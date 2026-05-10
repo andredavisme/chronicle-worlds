@@ -2,27 +2,10 @@
 -- Migration 004 — Milestone 7 Test Suite
 -- Chronicle Worlds
 -- =============================================================
--- PURPOSE: Edge-case validation for race resolution, trigger
--- correctness, branch limits, natural progression schedule, and
--- RLS isolation data setup.
---
 -- HOW TO RUN:
---   1. Replace PLAYER_A_UUID with your real auth user UUID from
---      the Supabase dashboard (Authentication → Users).
---   2. Paste the entire file into Supabase SQL Editor.
---   3. Run — inspect each SELECT result set in order.
---   4. This migration is wrapped in a transaction and ROLLS BACK
---      at the end so no test data is persisted to production.
---      To persist fixtures for live client testing, change
---      ROLLBACK to COMMIT at the bottom.
---
--- DEPENDENCIES:
---   001_core_schema        — settings, characters, events, chronicle,
---                            attribute_modifiers, materials,
---                            physical_environments
---   002_multiplayer_extensions — players, branches, player_chronicle_access,
---                                turn_queue view, advance_turn trigger,
---                                RLS policy on chronicle
+--   1. Replace PLAYER_A_UUID with your real auth user UUID.
+--   2. Paste into Supabase SQL Editor and run.
+--   3. Ends with ROLLBACK — change to COMMIT to persist fixtures.
 -- =============================================================
 
 BEGIN;
@@ -41,128 +24,97 @@ END $$;
 CREATE TEMP TABLE _test_inputs AS
 SELECT
   'PLAYER_A_UUID'::uuid AS player_a,
-  -- Optional: second auth user for RLS isolation test.
-  -- Leave as all-zeros to skip that section.
   '00000000-0000-0000-0000-000000000000'::uuid AS player_b;
 
 -- ─────────────────────────────────────────────
 -- 1. FIXTURES
+-- IDs start at 100 to avoid collision with existing rows.
+-- All PKs are plain integers with no sequence — must be explicit.
 -- ─────────────────────────────────────────────
--- Genesis setting.
--- Columns: setting_id, time_unit, origin_x, origin_y, origin_z, inspiration
 INSERT INTO settings (setting_id, time_unit, origin_x, origin_y, origin_z, inspiration)
 VALUES (1, 0, 0, 0, 0, NULL)
 ON CONFLICT (setting_id) DO NOTHING;
 
--- Primary character.
 INSERT INTO characters (
   character_id, age, health, attack, defense, wealth, inspiration, size
-)
-VALUES (1, 0, 10, 0, 0, 0, 0, 1)
+) VALUES
+  (1, 0, 10, 0, 0, 0, 0, 1),
+  (2, 0, 10, 0, 0, 0, 0, 1)
 ON CONFLICT (character_id) DO NOTHING;
 
--- Secondary character for player B.
-INSERT INTO characters (
-  character_id, age, health, attack, defense, wealth, inspiration, size
-)
-VALUES (2, 0, 10, 0, 0, 0, 0, 1)
-ON CONFLICT (character_id) DO NOTHING;
-
--- Player A row.
 INSERT INTO players (player_id, controlled_character_id)
-SELECT i.player_a, 1
-FROM _test_inputs i
+SELECT i.player_a, 1 FROM _test_inputs i
 ON CONFLICT (player_id) DO NOTHING;
 
--- Player B row (only if a real UUID was supplied).
 INSERT INTO players (player_id, controlled_character_id)
-SELECT i.player_b, 2
-FROM _test_inputs i
+SELECT i.player_b, 2 FROM _test_inputs i
 WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid
 ON CONFLICT (player_id) DO NOTHING;
 
--- Physical environment for travel duration math.
--- Columns: environment_id, setting_id, age, temperature, density, hydration, population, grid_cell_id
 INSERT INTO physical_environments (
   environment_id, setting_id, temperature, density, hydration, population
-)
-VALUES (1, 1, 20, 4, 6, 1)
+) VALUES (100, 1, 20, 4, 6, 1)
 ON CONFLICT (environment_id) DO NOTHING;
 
--- Material for travel duration math.
--- Columns: material_id, source, age, durability, implementation, inspiration
 INSERT INTO materials (material_id, source, durability, implementation)
-VALUES (1, 'test', 2, 2)
+VALUES (100, 'test', 2, 2)
 ON CONFLICT (material_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────
 -- TEST 1: setting_id NOT NULL enforcement
--- Expected: the good insert succeeds.
+-- Expected: insert succeeds, TEST 1 PASS returned.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
-  event_type, duration_units, start_timestamp,
+  event_id, event_type, duration_units, start_timestamp,
   resolution_state, setting_id
-)
-VALUES (
-  'exchange_information', 10,
+) VALUES (
+  100, 'exchange_information', 10,
   EXTRACT(EPOCH FROM NOW()), 'pending', 1
 );
 
 SELECT 'TEST 1 PASS — setting_id insert succeeded' AS result;
 
--- Uncomment to verify NOT NULL rejection:
--- INSERT INTO events (
---   event_type, duration_units, start_timestamp, resolution_state
--- )
--- VALUES ('exchange_information', 10, EXTRACT(EPOCH FROM NOW()), 'pending');
-
 -- ─────────────────────────────────────────────
 -- TEST 2: advance_turn trigger increments turn_number
--- Expected: two chronicle inserts produce turn_number = N and N+1.
+-- Expected: turn_number increments 1 → 2.
 -- ─────────────────────────────────────────────
-WITH e1 AS (
-  INSERT INTO events (
-    event_type, duration_units, start_timestamp,
-    resolution_state, setting_id, submit_timestamp
-  )
-  VALUES (
-    'exchange_information', 10,
-    EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
-    EXTRACT(EPOCH FROM NOW())
-  )
-  RETURNING event_id
-)
+INSERT INTO events (
+  event_id, event_type, duration_units, start_timestamp,
+  resolution_state, setting_id, submit_timestamp
+) VALUES (
+  101, 'exchange_information', 10,
+  EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
+  EXTRACT(EPOCH FROM NOW())
+);
+
 INSERT INTO chronicle (
-  event_id, character_id, player_id, branch_id,
+  chronicle_id, event_id, character_id, player_id, branch_id,
   timestamp, sequence_index, submit_timestamp, resolution_order
 )
 SELECT
-  e1.event_id, 1, i.player_a, 0,
+  100, 101, 1, i.player_a, 0,
   EXTRACT(EPOCH FROM NOW()), 1,
   EXTRACT(EPOCH FROM NOW()), 1
-FROM e1, _test_inputs i;
+FROM _test_inputs i;
 
-WITH e2 AS (
-  INSERT INTO events (
-    event_type, duration_units, start_timestamp,
-    resolution_state, setting_id, submit_timestamp
-  )
-  VALUES (
-    'exchange_material', 3,
-    EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
-    EXTRACT(EPOCH FROM NOW())
-  )
-  RETURNING event_id
-)
+INSERT INTO events (
+  event_id, event_type, duration_units, start_timestamp,
+  resolution_state, setting_id, submit_timestamp
+) VALUES (
+  102, 'exchange_material', 3,
+  EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
+  EXTRACT(EPOCH FROM NOW())
+);
+
 INSERT INTO chronicle (
-  event_id, character_id, player_id, branch_id,
+  chronicle_id, event_id, character_id, player_id, branch_id,
   timestamp, sequence_index, submit_timestamp, resolution_order
 )
 SELECT
-  e2.event_id, 1, i.player_a, 0,
+  101, 102, 1, i.player_a, 0,
   EXTRACT(EPOCH FROM NOW()), 2,
   EXTRACT(EPOCH FROM NOW()), 2
-FROM e2, _test_inputs i;
+FROM _test_inputs i;
 
 SELECT
   'TEST 2' AS test,
@@ -176,51 +128,28 @@ LIMIT 4;
 
 -- ─────────────────────────────────────────────
 -- TEST 3: turn_queue race ordering
--- Expected: lower submit_timestamp → queue_pos 1.
+-- Expected: submit_timestamp 1000.001 → queue_pos 1.
 -- ─────────────────────────────────────────────
-WITH p1 AS (
-  INSERT INTO events (
-    event_type, duration_units, start_timestamp,
-    resolution_state, setting_id, submit_timestamp
-  )
-  VALUES (
-    'introduce_conflict', 5,
-    EXTRACT(EPOCH FROM NOW()), 'pending', 1,
-    1000.001
-  )
-  RETURNING event_id
-)
-INSERT INTO chronicle (
-  event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
-)
-SELECT
-  p1.event_id, 1, i.player_a, 0,
-  EXTRACT(EPOCH FROM NOW()), 10,
-  1000.001, 1
-FROM p1, _test_inputs i;
+INSERT INTO events (
+  event_id, event_type, duration_units, start_timestamp,
+  resolution_state, setting_id, submit_timestamp
+) VALUES
+  (103, 'introduce_conflict', 5, EXTRACT(EPOCH FROM NOW()), 'pending', 1, 1000.001),
+  (104, 'resolve_conflict',   7, EXTRACT(EPOCH FROM NOW()), 'pending', 1, 1000.002);
 
-WITH p2 AS (
-  INSERT INTO events (
-    event_type, duration_units, start_timestamp,
-    resolution_state, setting_id, submit_timestamp
-  )
-  VALUES (
-    'resolve_conflict', 7,
-    EXTRACT(EPOCH FROM NOW()), 'pending', 1,
-    1000.002
-  )
-  RETURNING event_id
-)
 INSERT INTO chronicle (
-  event_id, character_id, player_id, branch_id,
+  chronicle_id, event_id, character_id, player_id, branch_id,
   timestamp, sequence_index, submit_timestamp, resolution_order
 )
-SELECT
-  p2.event_id, 1, i.player_a, 0,
-  EXTRACT(EPOCH FROM NOW()), 11,
-  1000.002, 2
-FROM p2, _test_inputs i;
+SELECT 102, 103, 1, i.player_a, 0, EXTRACT(EPOCH FROM NOW()), 10, 1000.001, 1
+FROM _test_inputs i;
+
+INSERT INTO chronicle (
+  chronicle_id, event_id, character_id, player_id, branch_id,
+  timestamp, sequence_index, submit_timestamp, resolution_order
+)
+SELECT 103, 104, 1, i.player_a, 0, EXTRACT(EPOCH FROM NOW()), 11, 1000.002, 2
+FROM _test_inputs i;
 
 SELECT
   'TEST 3' AS test,
@@ -234,8 +163,8 @@ ORDER BY turn_number DESC, queue_pos ASC
 LIMIT 5;
 
 -- ─────────────────────────────────────────────
--- TEST 4: branch limit count query
--- Expected: count = 3 for parent_branch_id = 0.
+-- TEST 4: branch limit count
+-- Expected: branch_count = 3, status = LIMIT REACHED.
 -- ─────────────────────────────────────────────
 INSERT INTO branches (fork_timestamp, player_id, parent_branch_id)
 SELECT
@@ -243,8 +172,7 @@ SELECT
   i.player_a,
   0
 FROM _test_inputs i,
-     (VALUES (1),(2),(3)) AS s(n)
-ON CONFLICT DO NOTHING;
+     (VALUES (1),(2),(3)) AS s(n);
 
 SELECT
   'TEST 4' AS test,
@@ -261,10 +189,9 @@ GROUP BY parent_branch_id;
 
 -- ─────────────────────────────────────────────
 -- TEST 5: natural progression schedule
--- Expected: cycles at correct intervals.
+-- Expected: events_at_t arrays at correct intervals.
 -- ─────────────────────────────────────────────
-SELECT
-  'TEST 5 — environment/material/population schedule' AS test;
+SELECT 'TEST 5 — environment/material/population schedule' AS test;
 
 SELECT
   t,
@@ -274,22 +201,15 @@ SELECT
     CASE WHEN t % 50  = 0 THEN 'population_spawn'      END
   ], NULL) AS events_at_t
 FROM generate_series(50, 500, 1) AS t
-WHERE t % 100 = 0
-   OR t % 80  = 0
-   OR t % 50  = 0
+WHERE t % 100 = 0 OR t % 80 = 0 OR t % 50 = 0
 ORDER BY t;
 
-SELECT
-  d AS duration_unit,
-  'material_minor_change' AS event
+SELECT d AS duration_unit, 'material_minor_change' AS event
 FROM generate_series(3, 15, 3) AS d
 ORDER BY d;
 
 -- ─────────────────────────────────────────────
--- TEST 6: travel duration formula validation
--- Uses environment_id=1 (density=4, hydration=6)
--- and material_id=1 (durability=2, implementation=2)
--- with character health=10, size=1, inspiration=0.
+-- TEST 6: travel duration formula
 -- Expected: computed_duration_units = 1
 -- ─────────────────────────────────────────────
 SELECT
@@ -304,36 +224,34 @@ FROM
   physical_environments pe,
   characters            c,
   materials             m
-WHERE pe.environment_id = 1
+WHERE pe.environment_id = 100
   AND c.character_id    = 1
-  AND m.material_id     = 1;
+  AND m.material_id     = 100;
 
 -- ─────────────────────────────────────────────
 -- TEST 7: RLS isolation data setup
 -- Skipped if player_b is the all-zeros placeholder.
 -- ─────────────────────────────────────────────
-WITH eb AS (
-  INSERT INTO events (
-    event_type, duration_units, start_timestamp,
-    resolution_state, setting_id, submit_timestamp
-  )
-  SELECT
-    'exchange_information', 10,
-    EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
-    EXTRACT(EPOCH FROM NOW())
-  FROM _test_inputs i
-  WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid
-  RETURNING event_id
+INSERT INTO events (
+  event_id, event_type, duration_units, start_timestamp,
+  resolution_state, setting_id, submit_timestamp
 )
+SELECT
+  105, 'exchange_information', 10,
+  EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
+  EXTRACT(EPOCH FROM NOW())
+FROM _test_inputs i
+WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid;
+
 INSERT INTO chronicle (
-  event_id, character_id, player_id, branch_id,
+  chronicle_id, event_id, character_id, player_id, branch_id,
   timestamp, sequence_index, submit_timestamp, resolution_order
 )
 SELECT
-  eb.event_id, 2, i.player_b, 0,
+  104, 105, 2, i.player_b, 0,
   EXTRACT(EPOCH FROM NOW()), 20,
   EXTRACT(EPOCH FROM NOW()), 1
-FROM eb, _test_inputs i
+FROM _test_inputs i
 WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid;
 
 SELECT
@@ -351,14 +269,7 @@ GROUP BY player_id
 ORDER BY player_id;
 
 -- Manual RLS verification:
---   1. Sign in as player A in the frontend.
---   2. Chronicle panel must show ONLY player A rows.
---   3. Sign in as player B.
---   4. Chronicle panel must show ONLY player B rows.
+--   1. Sign in as player A → Chronicle panel shows ONLY player A rows.
+--   2. Sign in as player B → Chronicle panel shows ONLY player B rows.
 
--- ─────────────────────────────────────────────
--- ROLLBACK — no test data persisted.
--- Change to COMMIT to keep fixtures for live
--- client testing.
--- ─────────────────────────────────────────────
 ROLLBACK;
