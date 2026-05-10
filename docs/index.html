@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chronicle Worlds</title>
+    <!-- inline SVG favicon — no 404 -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230a0a0f'/><ellipse cx='16' cy='20' rx='10' ry='5' fill='%23224422'/><ellipse cx='16' cy='16' rx='6' ry='3' fill='%236688ff'/><ellipse cx='16' cy='12' rx='3' ry='1.5' fill='%238888cc'/></svg>" />
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
@@ -122,7 +124,6 @@
       <button id="auth-sign-out">sign out</button>
     </header>
 
-    <!-- Auth Panel -->
     <div id="auth-panel">
       <h2 style="color:#8888cc;letter-spacing:2px">ENTER THE WORLD</h2>
       <input type="email" id="auth-email" placeholder="email" autocomplete="email" />
@@ -132,7 +133,6 @@
       <span id="auth-error"></span>
     </div>
 
-    <!-- Game Area -->
     <div id="game-area">
       <canvas id="grid-canvas"></canvas>
     </div>
@@ -159,21 +159,21 @@
       <span id="branch-info">branch: root</span>
     </footer>
 
-    <!--
-      Using unpkg instead of jsDelivr — jsDelivr is blocked by browser Tracking Prevention.
-      The UMD bundle exposes the global `supabase` (not `supabase_js`).
-      Our client variable is named `sb` to avoid the name clash.
-    -->
     <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
     <script>
-      // ─── Supabase client ─────────────────────────────────────────
-      // UMD bundle exposes global `supabase` — we alias our client as `sb`
+      // UMD global is `supabase`; our client is `sb` to avoid the name clash.
+      // sessionStorage avoids Tracking Prevention warnings (no cross-origin localStorage).
       const SUPABASE_URL = 'https://hhyhulqngdkwsxhymmcd.supabase.co'
       const SUPABASE_KEY = 'sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI'
-      const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+      const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          storage:        window.sessionStorage,
+          persistSession: true,
+          autoRefreshToken: true,
+        }
+      })
 
-      // ─── DOM refs ───────────────────────────────────────────────
       const authPanel       = document.getElementById('auth-panel')
       const gameArea        = document.getElementById('game-area')
       const sidebar         = document.getElementById('sidebar')
@@ -186,16 +186,12 @@
       const canvas          = document.getElementById('grid-canvas')
       const signOutBtn      = document.getElementById('auth-sign-out')
 
-      // ─── Grid renderer ─────────────────────────────────────────
-      let ctx
-      let entities = []
+      // ─── Grid renderer
+      let ctx, entities = []
       const TILE_W = 48, TILE_H = 24
 
       function isoProject(x, y, z) {
-        return {
-          sx: (x - y) * (TILE_W / 2),
-          sy: (x + y) * (TILE_H / 2) - z * TILE_H,
-        }
+        return { sx: (x - y) * (TILE_W / 2), sy: (x + y) * (TILE_H / 2) - z * TILE_H }
       }
 
       function initGridRenderer() {
@@ -218,12 +214,9 @@
           .is('timestamp_end', null)
         if (error) { console.error('entity_positions:', error); return }
         entities = (data || []).map(row => ({
-          entity_type:    row.entity_type,
-          entity_id:      row.entity_id,
+          entity_type: row.entity_type, entity_id: row.entity_id,
           effective_size: row.effective_size,
-          x: row.grid_cells?.x ?? 0,
-          y: row.grid_cells?.y ?? 0,
-          z: row.grid_cells?.z ?? 0,
+          x: row.grid_cells?.x ?? 0, y: row.grid_cells?.y ?? 0, z: row.grid_cells?.z ?? 0,
         }))
         renderGrid()
       }
@@ -231,31 +224,26 @@
       function renderGrid() {
         if (!ctx) return
         ctx.clearRect(0, 0, canvas.width, canvas.height)
-        const cx = canvas.width / 2
-        const cy = canvas.height / 2
+        const cx = canvas.width / 2, cy = canvas.height / 2
         for (const e of entities) {
           const { sx, sy } = isoProject(e.x, e.y, e.z)
           const r = Math.max(4, (e.effective_size || 1) * 6)
           ctx.beginPath()
           ctx.ellipse(cx + sx, cy + sy, r, r * 0.55, 0, 0, Math.PI * 2)
-          ctx.fillStyle = e.entity_type === 'character' ? '#6688ff'
-                        : e.entity_type === 'setting'   ? '#224422'
-                        : '#444466'
+          ctx.fillStyle = e.entity_type === 'character' ? '#6688ff' : e.entity_type === 'setting' ? '#224422' : '#444466'
           ctx.fill()
           ctx.fillStyle = '#88aaff'
           ctx.font = '9px Courier New'
           ctx.fillText(`${e.entity_type[0].toUpperCase()}${e.entity_id}`, cx + sx + r + 2, cy + sy + 3)
         }
         if (entities.length === 0) {
-          ctx.fillStyle = '#2a2a3a'
-          ctx.font = '12px Courier New'
-          ctx.textAlign = 'center'
+          ctx.fillStyle = '#2a2a3a'; ctx.font = '12px Courier New'; ctx.textAlign = 'center'
           ctx.fillText('no entities in world', canvas.width / 2, canvas.height / 2)
           ctx.textAlign = 'left'
         }
       }
 
-      // ─── Chronicle ──────────────────────────────────────────────
+      // ─── Chronicle
       async function loadChronicle() {
         const { data, error } = await sb
           .from('chronicle')
@@ -268,21 +256,15 @@
       }
 
       function renderChronicle(entries) {
-        if (entries.length === 0) {
-          chronicleListEl.innerHTML = '<span style="color:#333">no chronicle entries yet</span>'
-          return
-        }
+        if (!entries.length) { chronicleListEl.innerHTML = '<span style="color:#333">no chronicle entries yet</span>'; return }
         chronicleListEl.innerHTML = entries.map(entry => {
           const branchClass = entry.branch_id > 0 ? `branch-${Math.min(entry.branch_id, 3)}` : ''
-          const eventType   = entry.events?.event_type ?? 'unknown'
-          const duration    = entry.events?.duration_units ?? '?'
-          const branchLabel = entry.branch_id > 0 ? ` [branch ${entry.branch_id}]` : ''
           const t = entry.timestamp?.toFixed ? entry.timestamp.toFixed(2) : entry.timestamp
           return `<div class="chronicle-entry ${branchClass}">
             <span style="color:#555">t=${t}</span>
             <span style="color:#8888cc">turn ${entry.turn_number}</span>
-            <span>${eventType}</span>
-            <span style="color:#444">${duration}u${branchLabel}</span>
+            <span>${entry.events?.event_type ?? 'unknown'}</span>
+            <span style="color:#444">${entry.events?.duration_units ?? '?'}u${entry.branch_id > 0 ? ` [branch ${entry.branch_id}]` : ''}</span>
           </div>`
         }).join('')
       }
@@ -294,11 +276,9 @@
         chronicleListEl.prepend(div)
       }
 
-      // ─── Turn manager ───────────────────────────────────────────
-      const COOLDOWN_MS      = 60_000
-      const DEFAULT_SETTING_ID = 1
-      let cooldownEnd   = 0
-      let cooldownTimer = null
+      // ─── Turn manager
+      const COOLDOWN_MS = 60_000, DEFAULT_SETTING_ID = 1
+      let cooldownEnd = 0, cooldownTimer = null
 
       function startCooldown() {
         cooldownEnd = Date.now() + COOLDOWN_MS
@@ -312,27 +292,18 @@
 
       async function submitAction(action, details = {}) {
         const now = Date.now()
-        if (now < cooldownEnd) {
-          cooldownEl.textContent = `cooldown: ${Math.ceil((cooldownEnd - now) / 1000)}s`
-          return
-        }
+        if (now < cooldownEnd) { cooldownEl.textContent = `cooldown: ${Math.ceil((cooldownEnd - now) / 1000)}s`; return }
         const { data: { session } } = await sb.auth.getSession()
         if (!session) { statusEl.textContent = 'not authenticated'; return }
-
         const { data, error } = await sb.functions.invoke('resolve-turn', {
-          body: {
-            action,
-            player_id: session.user.id,
-            details: {
-              setting_id:       DEFAULT_SETTING_ID,
-              submit_timestamp: now / 1000,
-              sequence_index:   Math.floor(Math.random() * 1_000_000),
-              ...details,
-            },
-          },
+          body: { action, player_id: session.user.id, details: {
+            setting_id: DEFAULT_SETTING_ID,
+            submit_timestamp: now / 1000,
+            sequence_index: Math.floor(Math.random() * 1_000_000),
+            ...details,
+          }},
         })
         if (error) throw error
-
         if (data.status === 'resolved') {
           startCooldown()
           turnInfoEl.textContent = `last turn: ${data.event?.turn_number ?? '?'}`
@@ -343,9 +314,9 @@
         return data
       }
 
-      // ─── Auth ──────────────────────────────────────────────────
+      // ─── Auth
       document.getElementById('auth-sign-in').addEventListener('click', async () => {
-        const email    = document.getElementById('auth-email').value.trim()
+        const email = document.getElementById('auth-email').value.trim()
         const password = document.getElementById('auth-password').value
         document.getElementById('auth-error').textContent = ''
         const { error } = await sb.auth.signInWithPassword({ email, password })
@@ -353,7 +324,7 @@
       })
 
       document.getElementById('auth-sign-up').addEventListener('click', async () => {
-        const email    = document.getElementById('auth-email').value.trim()
+        const email = document.getElementById('auth-email').value.trim()
         const password = document.getElementById('auth-password').value
         document.getElementById('auth-error').textContent = ''
         const { error } = await sb.auth.signUp({ email, password })
@@ -362,22 +333,19 @@
       })
 
       signOutBtn.addEventListener('click', () => sb.auth.signOut())
-
       document.getElementById('auth-password').addEventListener('keydown', e => {
         if (e.key === 'Enter') document.getElementById('auth-sign-in').click()
       })
 
-      // ─── Auth state machine ────────────────────────────────────
+      // ─── Auth state machine
       sb.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) showGame(session.user)
         else               showAuth()
       })
 
       async function showGame(user) {
-        authPanel.style.display  = 'none'
-        gameArea.style.display   = 'block'
-        sidebar.style.display    = 'flex'
-        signOutBtn.style.display = 'inline-block'
+        authPanel.style.display = 'none'; gameArea.style.display = 'block'
+        sidebar.style.display = 'flex'; signOutBtn.style.display = 'inline-block'
         statusEl.textContent     = `connected as ${user.email}`
         playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
 
@@ -394,39 +362,27 @@
             try {
               await submitAction(fresh.dataset.action)
               statusEl.textContent = `connected as ${user.email}`
-            } catch (e) {
-              statusEl.textContent = `error: ${e.message}`
-            } finally {
-              setActionsDisabled(false)
-            }
+            } catch (e) { statusEl.textContent = `error: ${e.message}` }
+            finally     { setActionsDisabled(false) }
           })
         })
 
         sb.channel('turns')
           .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
-            loadEntityPositions()
-            loadChronicle()
-            startCooldown()
-            const branchId = payload.branch_id ?? 0
-            branchInfoEl.textContent = `branch: ${branchId === 0 ? 'root' : branchId}`
+            loadEntityPositions(); loadChronicle(); startCooldown()
+            branchInfoEl.textContent = `branch: ${(payload.branch_id ?? 0) === 0 ? 'root' : payload.branch_id}`
           })
           .subscribe()
       }
 
       function showAuth() {
-        authPanel.style.display  = 'flex'
-        gameArea.style.display   = 'none'
-        sidebar.style.display    = 'none'
-        signOutBtn.style.display = 'none'
-        statusEl.textContent     = 'not connected'
-        playerInfoEl.textContent = '—'
-        turnInfoEl.textContent   = '—'
-        branchInfoEl.textContent = 'branch: root'
+        authPanel.style.display = 'flex'; gameArea.style.display = 'none'
+        sidebar.style.display = 'none'; signOutBtn.style.display = 'none'
+        statusEl.textContent = 'not connected'; playerInfoEl.textContent = '—'
+        turnInfoEl.textContent = '—'; branchInfoEl.textContent = 'branch: root'
       }
 
-      function setActionsDisabled(disabled) {
-        document.querySelectorAll('.action-btn').forEach(b => b.disabled = disabled)
-      }
+      function setActionsDisabled(d) { document.querySelectorAll('.action-btn').forEach(b => b.disabled = d) }
     </script>
   </body>
 </html>
