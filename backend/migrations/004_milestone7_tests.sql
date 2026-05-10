@@ -54,14 +54,12 @@ INSERT INTO physical_environments (
 ) VALUES (100, 1, 20, 4, 6, 1)
 ON CONFLICT (environment_id) DO NOTHING;
 
--- materials.durability and implementation are text in the live schema
 INSERT INTO materials (material_id, source, durability, implementation)
-VALUES (100, 'test', '2', '2')
+VALUES (100, 'test', 2.0, '2')
 ON CONFLICT (material_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────
 -- TEST 1: setting_id NOT NULL enforcement
--- Expected: insert succeeds, TEST 1 PASS returned.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
   event_id, event_type, duration_units, start_timestamp,
@@ -75,7 +73,6 @@ SELECT 'TEST 1 PASS — setting_id insert succeeded' AS result;
 
 -- ─────────────────────────────────────────────
 -- TEST 2: advance_turn trigger increments turn_number
--- Expected: turn_number increments 1 → 2.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
   event_id, event_type, duration_units, start_timestamp,
@@ -112,7 +109,6 @@ LIMIT 4;
 
 -- ─────────────────────────────────────────────
 -- TEST 3: turn_queue race ordering
--- Expected: submit_timestamp 1000.001 → queue_pos 1.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
   event_id, event_type, duration_units, start_timestamp,
@@ -150,7 +146,6 @@ LIMIT 5;
 
 -- ─────────────────────────────────────────────
 -- TEST 4: branch limit count
--- Expected: branch_count = 3, status = LIMIT REACHED.
 -- ─────────────────────────────────────────────
 INSERT INTO branches (fork_timestamp, player_id, parent_branch_id)
 SELECT
@@ -172,7 +167,6 @@ GROUP BY parent_branch_id;
 
 -- ─────────────────────────────────────────────
 -- TEST 5: natural progression schedule
--- Expected: events_at_t arrays at correct intervals.
 -- ─────────────────────────────────────────────
 SELECT 'TEST 5 — environment/material/population schedule' AS test;
 
@@ -193,16 +187,16 @@ ORDER BY d;
 
 -- ─────────────────────────────────────────────
 -- TEST 6: travel duration formula
--- materials.durability and implementation are text — cast to numeric.
+-- durability=real, implementation=text — cast implementation explicitly.
 -- Expected: computed_duration_units = 1
 -- ─────────────────────────────────────────────
 SELECT
   'TEST 6 — travel duration formula' AS test,
   GREATEST(1, ROUND(
     ((pe.density + pe.hydration) / 2.0)
-    * (c.size / GREATEST(c.health::numeric, 0.1))
-    / (m.durability::numeric * m.implementation::numeric)
-    * (CASE WHEN c.inspiration > 0 THEN 0.9 ELSE 1 END)
+    * (c.size::numeric / GREATEST(c.health::numeric, 0.1))
+    / (m.durability::numeric * CAST(m.implementation AS numeric))
+    * (CASE WHEN c.inspiration > 0 THEN 0.9 ELSE 1.0 END)
   ))::int AS computed_duration_units
 FROM
   physical_environments pe,
@@ -214,7 +208,6 @@ WHERE pe.environment_id = 100
 
 -- ─────────────────────────────────────────────
 -- TEST 7: RLS isolation data setup
--- Skipped if player_b is the all-zeros placeholder.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
   event_id, event_type, duration_units, start_timestamp,
@@ -250,9 +243,5 @@ WHERE player_id IN (
 )
 GROUP BY player_id
 ORDER BY player_id;
-
--- Manual RLS verification:
---   1. Sign in as player A → Chronicle panel shows ONLY player A rows.
---   2. Sign in as player B → Chronicle panel shows ONLY player B rows.
 
 ROLLBACK;
