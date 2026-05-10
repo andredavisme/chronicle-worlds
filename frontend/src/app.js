@@ -1,9 +1,8 @@
-import { supabase, signIn, signUp, signOut, onAuthChange } from './supabase-client.js'
+import { supabase, signIn, signUp, onAuthChange } from './supabase-client.js'
 import { initTurnManager, submitAction, resetCooldown } from './turn-manager.js'
 import { initGridRenderer, loadEntityPositions, updateGrid } from './grid-renderer.js'
 import { loadChronicle, appendChronicleEntry } from './chronicle-reader.js'
 
-// DOM refs
 const authPanel       = document.getElementById('auth-panel')
 const gameArea        = document.getElementById('game-area')
 const sidebar         = document.getElementById('sidebar')
@@ -12,56 +11,61 @@ const cooldownEl      = document.getElementById('cooldown-display')
 const playerInfoEl    = document.getElementById('player-info')
 const turnInfoEl      = document.getElementById('turn-info')
 const branchInfoEl    = document.getElementById('branch-info')
+const worldTimeEl     = document.getElementById('world-time')
 const chronicleListEl = document.getElementById('chronicle-list')
 const canvas          = document.getElementById('grid-canvas')
 
-// Auth UI
 document.getElementById('auth-sign-in').addEventListener('click', async () => {
-  const email    = document.getElementById('auth-email').value
+  const email = document.getElementById('auth-email').value
   const password = document.getElementById('auth-password').value
-  try {
-    await signIn(email, password)
-  } catch (e) {
-    document.getElementById('auth-error').textContent = e.message
-  }
+  try { await signIn(email, password) }
+  catch (e) { document.getElementById('auth-error').textContent = e.message }
 })
 
 document.getElementById('auth-sign-up').addEventListener('click', async () => {
-  const email    = document.getElementById('auth-email').value
+  const email = document.getElementById('auth-email').value
   const password = document.getElementById('auth-password').value
   try {
     await signUp(email, password)
     document.getElementById('auth-error').textContent = 'Check your email to confirm account.'
-  } catch (e) {
-    document.getElementById('auth-error').textContent = e.message
-  }
+  } catch (e) { document.getElementById('auth-error').textContent = e.message }
 })
 
-// Auth state machine
 onAuthChange(async (event, session) => {
-  if (session?.user) {
-    showGame(session.user)
-  } else {
-    showAuth()
-  }
+  if (session?.user) showGame(session.user)
+  else showAuth()
 })
+
+async function loadWorldTime() {
+  const { data } = await supabase
+    .from('world_tick_state')
+    .select('duration_unit')
+    .eq('id', 1)
+    .single()
+  const { data: setting } = await supabase
+    .from('settings')
+    .select('time_unit')
+    .eq('setting_id', 1)
+    .single()
+  if (data && setting) {
+    worldTimeEl.textContent = `tu: ${setting.time_unit} · du: ${data.duration_unit}`
+  }
+}
 
 async function showGame(user) {
-  authPanel.style.display = 'none'
-  gameArea.style.display  = 'block'
-  sidebar.style.display   = 'flex'
-  statusEl.textContent    = `connected as ${user.email}`
+  authPanel.style.display  = 'none'
+  gameArea.style.display   = 'block'
+  sidebar.style.display    = 'flex'
+  statusEl.textContent     = `connected as ${user.email}`
   playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
 
-  // Init subsystems
   initGridRenderer(canvas)
   await loadEntityPositions()
   await loadChronicle(chronicleListEl)
+  await loadWorldTime()
 
   initTurnManager({
-    onCooldown: (sec) => {
-      cooldownEl.textContent = sec > 0 ? `cooldown: ${sec}s` : ''
-    },
+    onCooldown: (sec) => { cooldownEl.textContent = sec > 0 ? `cooldown: ${sec}s` : '' },
     onResult: (result) => {
       if (result.status === 'resolved') {
         turnInfoEl.textContent = `last turn: ${result.event?.turn_number ?? '?'}`
@@ -72,7 +76,7 @@ async function showGame(user) {
     },
   })
 
-  // Realtime: player turn broadcasts
+  // Player turn broadcasts
   supabase.channel('turns')
     .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
       updateGrid(payload)
@@ -83,44 +87,43 @@ async function showGame(user) {
     })
     .subscribe()
 
-  // Realtime: world tick — subscribe to world_tick_state row updates
-  // Fires every minute when pg_cron calls world_tick()
+  // World tick — update time display + reload grid
   supabase.channel('world-tick')
-    .on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
-      (payload) => {
-        const du = payload.new?.duration_unit
-        statusEl.textContent = `connected as ${user.email} · du: ${du}`
-        // Reload grid — new chars may have spawned, materials changed, etc.
-        updateGrid(payload)
-      }
-    )
+    .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
+        (payload) => {
+          const du = payload.new?.duration_unit
+          statusEl.textContent = `connected as ${user.email} · du: ${du}`
+          loadWorldTime()
+          updateGrid(payload)
+        })
     .subscribe()
 
-  // Action buttons
-  document.querySelectorAll('.action-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const action = btn.dataset.action
-      setActionsDisabled(true)
-      try {
-        await submitAction(action)
-      } catch (e) {
-        statusEl.textContent = `error: ${e.message}`
-      } finally {
-        setActionsDisabled(false)
-      }
-    })
-  })
+  // Live entity spawn/move redraws
+  supabase.channel('entity-positions')
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'entity_positions' },
+        () => { loadEntityPositions() })
+    .subscribe()
 }
 
 function showAuth() {
-  authPanel.style.display  = 'flex'
-  gameArea.style.display   = 'none'
-  sidebar.style.display    = 'none'
-  statusEl.textContent     = 'not connected'
+  authPanel.style.display = 'flex'
+  gameArea.style.display  = 'none'
+  sidebar.style.display   = 'none'
+  statusEl.textContent    = 'not connected'
 }
 
 function setActionsDisabled(disabled) {
   document.querySelectorAll('.action-btn').forEach(btn => btn.disabled = disabled)
 }
+
+document.querySelectorAll('.action-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const action = btn.dataset.action
+    setActionsDisabled(true)
+    try { await submitAction(action) }
+    catch (e) { statusEl.textContent = `error: ${e.message}` }
+    finally { setActionsDisabled(false) }
+  })
+})
