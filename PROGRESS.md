@@ -21,61 +21,39 @@ This document is the **single source of truth** for development progress. Each m
 ---
 
 ### ✅ Milestone 1 — Database Schema: Core Tables
-**Date:** 2026-05-10
-**Status:** Complete
-**Migration:** `001_core_schema` (applied via Supabase MCP)
+**Date:** 2026-05-10 | **Migration:** `001_core_schema`
 
-**Tables created:**
-- `settings`, `grid_cells`, `characters`, `physical_environments`, `events`, `materials`, `entity_positions`, `chronicle`, `attribute_modifiers`, `relationship_effects`
-
-**Key decisions:**
-- `events.setting_id` is NOT NULL — genesis `settings` row must exist before any turn
-- All PKs are integers; `chronicle` is the central join table
+Tables: `settings`, `grid_cells`, `characters`, `physical_environments`, `events`, `materials`, `entity_positions`, `chronicle`, `attribute_modifiers`, `relationship_effects`. `events.setting_id` NOT NULL; all PKs are integers.
 
 ---
 
 ### ✅ Milestone 2 — Database Schema: Multiplayer Extensions
-**Date:** 2026-05-10
-**Status:** Complete
-**Migration:** `002_multiplayer_extensions`
+**Date:** 2026-05-10 | **Migration:** `002_multiplayer_extensions`
 
-**What was done:** Player identity, turn mechanics, time-travel branching, RLS, race-resolution.
-- Tables: `players`, `branches`, `player_chronicle_access`
-- RLS on `chronicle`: `FOR SELECT USING (player_id = auth.uid())`
-- Trigger: `advance_turn()` — auto-increments `turn_number` per player on chronicle insert
-- View: `turn_queue` — ranks pending events by `submit_timestamp`
-- `branch_id = 0` = root timeline; max 3 forks enforced in Edge Function
+Tables: `players`, `branches`, `player_chronicle_access`. RLS on `chronicle`. `advance_turn()` trigger. `turn_queue` view. `branch_id = 0` = root; max 3 forks enforced in Edge Function.
 
 ---
 
 ### ✅ Milestone 3 — Backend: Edge Function `resolve-turn`
-**Date:** 2026-05-10
-**Status:** Complete
-**Function ID:** `a68468fa-a326-4f75-9d51-72a73fa8e9c2` (v3, ACTIVE)
+**Date:** 2026-05-10 | **Function ID:** `a68468fa` (v3, ACTIVE)
 
-**Logic:** validate → queue check → branch check → insert event → apply modifiers → insert chronicle → resolve → broadcast → return.
+Pipeline: validate → queue check → branch check → insert event → apply modifiers → insert chronicle → resolve → broadcast → return. `verify_jwt: false` + manual JWT validation to fix CORS preflight block.
 
 **Modifier map:** Exchange Info=`inspiration+3` · Resolve Conflict=`health+3` · Introduce Conflict=`health-3` · Exchange Material=`wealth+3` · Travel=duration only
-
-**Key fixes:**
-- v1→v2: `event.eventid` → `event.event_id`
-- v2→v3: `verify_jwt: false` + manual JWT validation inside handler — Supabase gateway was rejecting OPTIONS preflight before function ran, causing CORS block from GitHub Pages
 
 ---
 
 ### ✅ Milestone 3a — Smoke Test: Full Turn Pipeline
-**Date:** 2026-05-10 · **Status:** Complete
+**Date:** 2026-05-10
 
-All 5 pipeline steps verified in SQL: turn_queue empty → event insert → modifier insert → chronicle insert (trigger fires) → event resolved.
+All 5 pipeline steps verified in SQL.
 
 ---
 
 ### ✅ Milestone 4 — Frontend: GitHub Pages Scaffold
-**Date:** 2026-05-10
-**Status:** Complete
-**Commit:** `712566b`
+**Date:** 2026-05-10 | **Commit:** `712566b`
 
-Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `turn-manager.js`, `grid-renderer.js`, `chronicle-reader.js`, `app.js`. GitHub Actions deploy workflow added.
+Full Vite + JS frontend in `/frontend/`. Modules: `supabase-client.js`, `turn-manager.js`, `grid-renderer.js`, `chronicle-reader.js`, `app.js`. GitHub Actions deploy workflow.
 
 ---
 
@@ -90,19 +68,11 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 ---
 
 ### ✅ Milestone 7 — Testing: Multiplayer & Edge Cases
-**Date:** 2026-05-10
-**Status:** Complete — all DB-side and browser tests verified live
-**Migrations:** `004_milestone7_tests` (ROLLBACK/reference) · `005_persist_test_fixtures` (COMMIT)
+**Date:** 2026-05-10 | **Migrations:** `004_milestone7_tests` (ROLLBACK) · `005_persist_test_fixtures` (COMMIT)
 
-**Live DB results:** ✅ Genesis setting · ✅ advance_turn trigger · ✅ Queue clear · ✅ Branch limit (3) · ✅ Travel formula · ✅ RLS isolation data
+All DB-side and browser tests verified live: genesis setting, advance_turn trigger, queue, branch limit (3), travel formula, RLS isolation.
 
-**Browser tests (2026-05-10, Session 2):**
-- ✅ Sign in as Player A → submit action → chronicle updated + cooldown running via Realtime
-- ✅ Incognito as `test@chroincle.local` → Player A rows hidden (RLS confirmed)
-- ✅ 4th branch fork → `409 Branch fork limit reached (max 3)`
-- ✅ Submit without `setting_id` → `500` Postgres NOT NULL constraint error
-
-**Persisted fixture reference:**
+**Fixture reference:**
 | Fixture | Value |
 |---|---|
 | Player A | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` (`dev@chronicle.local`) |
@@ -115,36 +85,43 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 
 ### ✅ Milestone 8a — Session 2 Infrastructure Fixes
 **Date:** 2026-05-10
-**Status:** Complete
 
-**Problems found and fixed during browser testing:**
-
-1. **CORS block on `resolve-turn`** — `verify_jwt: true` caused Supabase gateway to reject OPTIONS preflight with no CORS headers. Fixed: redeployed as v3 with `verify_jwt: false` + manual `anonClient.auth.getUser()` validation inside the handler. OPTIONS now returns 200.
-
-2. **`Player not found` 500** — 3 of 4 auth users had no `players` row. Fixed: `006_auto_provision_players` migration backfilled all existing users and added `trg_provision_player` trigger for future signups.
-
-3. **`null value in column "event_id"` 500** — `events`, `chronicle`, `attribute_modifiers`, `entity_positions` PKs had no sequences/defaults. Fixed: `007_add_pk_sequences` migration added sequences to all four.
-
-4. **`Database error creating new user`** — RLS on `characters` and `players` blocked the trigger even with `SECURITY DEFINER`. Fixed: `008_rls_policies_and_trigger_fix` added `service_role` INSERT policies on both tables + `SET search_path = public` on trigger function.
-
-**Migrations applied this session:**
-- `006_auto_provision_players` — player provisioning trigger + backfill
-- `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions
-- `008_rls_policies_and_trigger_fix` — RLS policies for service_role + player read/update
+- CORS block fixed (verify_jwt + manual auth)
+- `Player not found` 500 fixed (`006_auto_provision_players`)
+- Null PK 500 fixed (`007_add_pk_sequences`)
+- RLS blocking trigger fixed (`008_rls_policies_and_trigger_fix`)
 
 ---
 
-### ✅ Milestone 8b — Polish & Scale (Partial)
-**Date:** 2026-05-10
-**Status:** Repo sync complete; mobile responsiveness pending
+### ✅ Milestone 8b — Polish & Repo Sync
+**Date:** 2026-05-10 | **Status:** Complete
 
 **Completed:**
-- [x] Add migration SQL files 005–008 to `backend/migrations/` in repo
-  - Commit: `0030e6c` — all four files pushed, repo now matches live Supabase DB
+- [x] Migrations 005–008 committed to `backend/migrations/` (commit `0030e6c`)
+- [x] Mobile responsiveness (commit `cab16a2`)
+  - Responsive CSS: desktop = `1fr 320px` sidebar, mobile ≤767px = full-width canvas + bottom drawer
+  - `#mobile-panel-toggle` button slides sidebar up from bottom (55vh)
+  - Action buttons reflow to 2-column grid on mobile for easy tapping
+  - `grid-renderer.js`: `getTileSize()` scales `TILE_W` from 20–48px based on `canvas.width / 800`, recomputed on every `resize` + `render`
+  - Labels hidden when tile width < 28px to avoid clutter
+  - `height: 100dvh` (dynamic viewport height) fixes mobile browser chrome overlap
+- [x] Scale path: Supabase Pro $25/mo; scale via setting shards (documented in README/pitch)
 
-**Remaining:**
-- [ ] Mobile responsiveness for canvas grid
-- [ ] Supabase Pro / scale path notes
+---
+
+### 🔼 Next: Milestone 9 — Natural Progression Loop
+**Status:** Not started
+
+**Goal:** Implement the autonomous simulation backbone — the world advances on its own underneath player turns.
+
+**Scope:**
+- [ ] Supabase `pg_cron` job (or Edge Function cron) to tick world time periodically
+- [ ] Environment cycle every 100 time units
+- [ ] Material cycle: major change every 80u, minor every 3 durations
+- [ ] Population spawn: 1 age-0 character every 50 durations
+- [ ] 25 events per 500 time units spawn new random settings
+- [ ] Relationship randomization at spawn, adjusted by events
+- [ ] Broadcast world-tick to connected clients via Realtime
 
 ---
 
@@ -155,14 +132,14 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 | GitHub Repo | [andredavisme/chronicle-worlds](https://github.com/andredavisme/chronicle-worlds) |
 | Supabase Project | `hhyhulqngdkwsxhymmcd` (us-west-2) |
 | Live URL | [andredavisme.github.io/chronicle-worlds](https://andredavisme.github.io/chronicle-worlds/) |
-| Migration 001 | `001_core_schema` — 10 base tables; `events.setting_id` NOT NULL |
+| Migration 001 | `001_core_schema` — 10 base tables |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` |
 | Migration 004 | `004_milestone7_tests` (ROLLBACK; reference only) |
-| Migration 005 | `005_persist_test_fixtures` (COMMIT, 2026-05-10) |
+| Migration 005 | `005_persist_test_fixtures` (COMMIT) |
 | Migration 006 | `006_auto_provision_players` — player provisioning trigger + backfill |
 | Migration 007 | `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions |
-| Migration 008 | `008_rls_policies_and_trigger_fix` — RLS policies for service_role + player read/update |
+| Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
