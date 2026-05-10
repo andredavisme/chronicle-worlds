@@ -29,9 +29,9 @@ All prior milestones complete. Schema, Edge Function, frontend scaffold, Realtim
 **Date:** 2026-05-10 | **Status:** Complete
 **Migration:** `009_natural_progression_loop` | **Commit:** `3c4a1da`
 
-See prior PROGRESS.md entry for full details. Summary:
+See prior entry for full details. Summary:
 - `world_tick_state` singleton, `proc_words` vocabulary table
-- `world_tick()` function: per-tick aging, material decay, char spawn (du%50), material change (du%80), env cycle (tu%100), setting spawn (tu%500)
+- `world_tick()`: per-tick aging, material decay, char spawn (du%50), material change (du%80), env cycle (tu%100), setting spawn (tu%500)
 - `pg_cron` job `world-tick` — `* * * * *` — ACTIVE
 - Frontend: `world-tick` Realtime channel on `world_tick_state`
 
@@ -41,48 +41,42 @@ See prior PROGRESS.md entry for full details. Summary:
 **Date:** 2026-05-10 | **Status:** Complete
 **Migration:** `010_world_seeding` | **Commit:** `5190083`
 
-**What was built:**
+See prior entry for full details. Summary:
+- 7×7×1 `grid_cells` seeded for genesis setting
+- entity_positions: char1@(0,0,0), char7@(1,1,0), material101@(-1,0,0), setting1@(0,0,0)
+- `seed_setting_grid()` helper; `world_tick()` patched; `REPLICA IDENTITY FULL` on entity_positions
+- Frontend: isometric boundary box per setting, `#world-time` footer (tu/du), entity_positions Realtime channel
 
-#### DB (migration 010)
-- Added `DEFAULT nextval(...)` sequence to `grid_cells.grid_cell_id`
-- Added `DEFAULT extract(epoch FROM now())` to `entity_positions.timestamp_start` (was NOT NULL, no default — caused first apply attempt to fail)
-- Seeded **7×7×1** `grid_cells` for genesis setting (x: -3→3, y: -3→3, z=0), all capacity=10, expansion_state='stable'
-- `entity_positions` seeded:
-  - character 1 @ (0,0,0) — genesis character, size 3
-  - character 7 @ (1,1,0) — test character, size 2
-  - material 101 @ (-1,0,0) — carved stone, size 2
-  - setting 1 @ (0,0,0) — setting node, size 7
-- `physical_environments` row for setting 1: temp=18, density=60, hydration=70, pop=2
-- `seed_setting_grid(setting_id, radius=3)` helper — called by `world_tick()` on new setting spawns
-- `world_tick()` patched to use `seed_setting_grid` + supply `timestamp_start` on all `entity_positions` inserts
-- `REPLICA IDENTITY FULL` on `entity_positions` (enables Realtime change streaming)
+---
 
-#### Smoke test results
-- `grid_cells` count: 49 (7×7) ✅
-- Active entity_positions: char1@(0,0,0), char7@(1,1,0), material101@(-1,0,0), setting1@(0,0,0) ✅
-- `world_tick_state.duration_unit`: 8 (pg_cron running live) ✅
+### ✅ CI/CD Fix — GitHub Pages Deploy Pipeline
+**Date:** 2026-05-10 | **Status:** Complete
+**Commits:** `de6b193` (workflow fix) → `69a09d4` (permissions) → `fb997a3` (trigger) — **Deploy #29 ✅ green**
 
-#### Frontend
-- `grid-renderer.js`: `loadEntityPositions()` now fetches joined `grid_cells(x,y,z,setting_id)`; derives per-setting bounding boxes and draws isometric diamond outline per setting (dashed, labelled `S1`)
-- `index.html`: added `#world-time` span in footer
-- `app.js`: `loadWorldTime()` queries `world_tick_state` + `settings` on load; updates `#world-time` as `tu: N · du: N`; new `entity-positions` Realtime channel (postgres_changes `*`) triggers `loadEntityPositions()` live
+**Problem:** `peaceiris/actions-gh-pages@v4` was configured with `publish_branch: main`, which GitHub prohibits (can’t deploy from main to main). Re-running old runs always used the old workflow snapshot — didn’t pick up fixes.
 
-**Key decisions:**
-- Action buttons moved outside `showGame()` scope (fixed a bug where they'd only work after sign-in event, not on page reload with existing session)
-- Setting boundary derived client-side from entity_positions join data — no extra RPC needed
-- `entity_positions` Realtime channel now fires on any insert/update/delete, so character spawns from `world_tick()` redraw the canvas automatically
+**Fix sequence:**
+1. Changed `publish_branch: main` → `publish_branch: gh-pages` in `deploy.yml`
+2. Created `gh-pages` branch (required to exist before first deploy)
+3. Added `permissions: pages: write / id-token: write` to workflow (required by GitHub for Pages deployments)
+4. Updated Pages source in repo Settings → Pages → branch: `gh-pages`, folder: `/ (root)` *(manual step by user)*
+5. Pushed a `frontend/` touch commit to trigger a fresh run (re-runs always use old workflow snapshot)
+
+**Result:** Deploy #29 green ✅. Site live at [andredavisme.github.io/chronicle-worlds](https://andredavisme.github.io/chronicle-worlds/)
+
+**Key lesson:** Never re-run a failed workflow to test a `deploy.yml` fix — re-runs snapshot the workflow at the original commit. Always push a new commit to `frontend/**` to trigger a fresh run.
 
 ---
 
 ### 🔼 Next: Milestone 11 — Travel Action + Grid Movement
 **Status:** Not started
 
-**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn't update `entity_positions`.
+**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn’t update `entity_positions`.
 
 **Scope:**
 - [ ] Edge Function `resolve-turn`: on `travel` action, close current `entity_positions` row (`timestamp_end = now()`), insert new row at target cell
-- [ ] Determine target cell: adjacent cell in direction encoded in action payload, or explicit `target_cell_id`
-- [ ] Frontend: Travel button opens a direction picker (N/S/E/W or click-on-grid) before submitting
+- [ ] Determine target cell: direction (N/S/E/W/up/down) encoded in action payload, or explicit `target_cell_id`
+- [ ] Frontend: Travel button opens a direction picker before submitting
 - [ ] Validate: target cell must exist, have capacity, be in same setting (cross-setting travel = future milestone)
 - [ ] `entity_positions` change fires Realtime → grid redraws automatically (already wired in M10)
 
@@ -95,6 +89,8 @@ See prior PROGRESS.md entry for full details. Summary:
 | GitHub Repo | [andredavisme/chronicle-worlds](https://github.com/andredavisme/chronicle-worlds) |
 | Supabase Project | `hhyhulqngdkwsxhymmcd` (us-west-2) |
 | Live URL | [andredavisme.github.io/chronicle-worlds](https://andredavisme.github.io/chronicle-worlds/) |
+| Pages source | `gh-pages` branch, `/ (root)` |
+| Deploy trigger | any push to `frontend/**` on `main` |
 | Migration 001 | `001_core_schema` — 10 base tables |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` |
