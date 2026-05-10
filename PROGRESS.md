@@ -134,13 +134,17 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 
 ---
 
-### 🔄 Milestone 8b — Polish & Scale
-**Status:** In progress
+### ✅ Milestone 8b — Polish & Scale (Partial)
+**Date:** 2026-05-10
+**Status:** Repo sync complete; mobile responsiveness pending
+
+**Completed:**
+- [x] Add migration SQL files 005–008 to `backend/migrations/` in repo
+  - Commit: `0030e6c` — all four files pushed, repo now matches live Supabase DB
 
 **Remaining:**
 - [ ] Mobile responsiveness for canvas grid
 - [ ] Supabase Pro / scale path notes
-- [ ] Add migration SQL files 006–008 to `backend/migrations/` in repo
 
 ---
 
