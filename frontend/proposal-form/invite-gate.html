@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chronicle Worlds — Developer Invite</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117; color: #e2e8f0;
+      min-height: 100vh; display: flex;
+      align-items: center; justify-content: center; padding: 24px 16px;
+    }
+    .gate-card {
+      background: #1a1d2e; border: 1px solid #2d3155;
+      border-radius: 16px; padding: 40px; width: 100%; max-width: 480px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .badge {
+      display: inline-block; background: #2d3155; color: #818cf8;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 4px 10px; border-radius: 99px; margin-bottom: 16px;
+    }
+    h1 { font-size: 22px; font-weight: 700; color: #f1f5f9; margin-bottom: 8px; }
+    .project-description {
+      font-size: 13px; color: #94a3b8; line-height: 1.7;
+      margin-bottom: 28px; padding: 16px;
+      background: #0f1117; border: 1px solid #2d3155; border-radius: 8px;
+    }
+    .project-description strong {
+      color: #cbd5e1; display: block; margin-bottom: 6px;
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    label { display: block; font-size: 13px; font-weight: 600; color: #cbd5e1; margin-bottom: 6px; }
+    .input-wrap { position: relative; margin-bottom: 8px; }
+    input[type="text"] {
+      width: 100%; background: #0f1117; border: 1px solid #2d3155;
+      border-radius: 8px; color: #e2e8f0; font-size: 14px;
+      padding: 11px 40px 11px 14px; outline: none; transition: border-color 0.2s;
+      font-family: 'Courier New', monospace; letter-spacing: 0.04em;
+    }
+    input[type="text"]:focus { border-color: #818cf8; }
+    input[type="text"].valid   { border-color: #34d399; }
+    input[type="text"].invalid { border-color: #f87171; }
+    .input-icon {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      font-size: 16px; pointer-events: none; opacity: 0; transition: opacity 0.2s;
+    }
+    .input-icon.show { opacity: 1; }
+    .hint { font-size: 12px; color: #64748b; margin-bottom: 24px; min-height: 18px; transition: color 0.2s; }
+    .hint.error   { color: #f87171; }
+    .hint.success { color: #34d399; }
+    .autofill-banner {
+      display: none; align-items: center; gap: 8px;
+      background: #0f2318; border: 1px solid #34d399;
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 12px; color: #34d399; margin-bottom: 20px;
+    }
+    .autofill-banner.show { display: flex; }
+    .btn {
+      width: 100%; background: #4f46e5; color: #fff; border: none;
+      padding: 13px; border-radius: 8px; font-size: 14px;
+      font-weight: 600; cursor: pointer; transition: background 0.2s, opacity 0.2s;
+    }
+    .btn:hover    { background: #4338ca; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .divider {
+      display: flex; align-items: center; gap: 12px;
+      margin: 24px 0 20px; color: #475569; font-size: 12px;
+    }
+    .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid #2d3155; }
+    .footer-note { margin-top: 20px; font-size: 11px; color: #475569; text-align: center; line-height: 1.6; }
+  </style>
+</head>
+<body>
+<div class="gate-card">
+  <div class="badge">Developer Access</div>
+  <h1>Chronicle Worlds</h1>
+
+  <div class="project-description" id="projectDescription">
+    <strong>About this project</strong>
+    <span id="descriptionText">A turn-based multiplayer procedural world simulation built on Supabase, GitHub, and GitHub Pages. We're looking for a full-stack developer to bring this technical specification to life across 5–7 weeks.</span>
+  </div>
+
+  <div class="autofill-banner" id="autofillBanner">
+    ✅ Invite link detected — your code has been filled in automatically.
+  </div>
+
+  <label for="inviteCode">Invite Code</label>
+  <div class="input-wrap">
+    <input type="text" id="inviteCode" placeholder="e.g. a3f9c2..." autocomplete="off" spellcheck="false" oninput="onCodeInput()" />
+    <span class="input-icon" id="inputIcon"></span>
+  </div>
+  <p class="hint" id="codeHint">Enter the code from your invite, or use the link you were sent.</p>
+
+  <button class="btn" id="continueBtn" onclick="handleContinue()" disabled>Continue to Proposal Form →</button>
+
+  <div class="divider">need access?</div>
+
+  <p class="footer-note">
+    Contact the project owner to request an invite link.<br />
+    Each code is single-use and tied to this project.
+  </p>
+</div>
+
+<script type="module">
+  const SUPABASE_URL     = '__SUPABASE_URL__';
+  const SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const token  = params.get('token');
+    if (token) {
+      const input = document.getElementById('inviteCode');
+      input.value = token;
+      input.classList.add('valid');
+      document.getElementById('inputIcon').textContent = '✓';
+      document.getElementById('inputIcon').classList.add('show');
+      document.getElementById('autofillBanner').classList.add('show');
+      document.getElementById('codeHint').textContent = 'Code auto-filled from your invite link.';
+      document.getElementById('codeHint').className = 'hint success';
+      document.getElementById('continueBtn').disabled = false;
+      loadInviteDescription(token);
+    }
+  });
+
+  window.onCodeInput = function() {
+    const val  = document.getElementById('inviteCode').value.trim();
+    const btn  = document.getElementById('continueBtn');
+    const icon = document.getElementById('inputIcon');
+    const hint = document.getElementById('codeHint');
+    window.history.replaceState({}, '', window.location.pathname);
+    document.getElementById('autofillBanner').classList.remove('show');
+    if (val.length >= 8) {
+      btn.disabled = false;
+      icon.textContent = '→';
+      icon.classList.add('show');
+      hint.textContent = 'Press Continue to validate your code.';
+      hint.className = 'hint';
+    } else {
+      btn.disabled = true;
+      icon.classList.remove('show');
+      hint.textContent = 'Enter the code from your invite, or use the link you were sent.';
+      hint.className = 'hint';
+    }
+  };
+
+  async function loadInviteDescription(token) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/proposal_invites?token=eq.${token}&select=description,is_active`,
+        { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
+      );
+      const [invite] = await res.json();
+      if (invite?.description) document.getElementById('descriptionText').textContent = invite.description;
+    } catch (_) {}
+  }
+
+  window.handleContinue = async function() {
+    const token = document.getElementById('inviteCode').value.trim();
+    const btn   = document.getElementById('continueBtn');
+    const hint  = document.getElementById('codeHint');
+    const input = document.getElementById('inviteCode');
+    const icon  = document.getElementById('inputIcon');
+    btn.disabled = true;
+    btn.textContent = 'Validating…';
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/proposal_invites?token=eq.${token}&select=invite_id,is_active,expires_at,max_uses,use_count`,
+        { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
+      );
+      const [invite] = await res.json();
+      if (!invite || !invite.is_active) { showInvalid(input, icon, hint, btn, 'Invalid or inactive invite code.'); return; }
+      const expired = invite.expires_at && new Date(invite.expires_at) < new Date();
+      if (expired) { showInvalid(input, icon, hint, btn, 'This invite link has expired.'); return; }
+      const maxed = invite.max_uses !== null && invite.use_count >= invite.max_uses;
+      if (maxed) { showInvalid(input, icon, hint, btn, 'This invite has reached its maximum uses.'); return; }
+      window.location.href = `/proposal-form/index.html?invite_id=${invite.invite_id}`;
+    } catch (_) {
+      showInvalid(input, icon, hint, btn, 'Could not validate code. Please try again.');
+    }
+  };
+
+  function showInvalid(input, icon, hint, btn, message) {
+    input.classList.remove('valid');
+    input.classList.add('invalid');
+    icon.textContent = '✕';
+    icon.classList.add('show');
+    hint.textContent = message;
+    hint.className = 'hint error';
+    btn.disabled = false;
+    btn.textContent = 'Continue to Proposal Form →';
+  }
+</script>
+</body>
+</html>
