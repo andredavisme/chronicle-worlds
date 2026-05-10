@@ -29,53 +29,62 @@ All prior milestones complete. Schema, Edge Function, frontend scaffold, Realtim
 **Date:** 2026-05-10 | **Status:** Complete
 **Migration:** `009_natural_progression_loop` | **Commit:** `3c4a1da`
 
-**What was built:**
-
-#### DB (migration 009)
-- `world_tick_state` singleton table — tracks `duration_unit` (total ticks) + `last_tick_at`; `REPLICA IDENTITY FULL` for Realtime
-- `proc_words` table — vocabulary for procedural generation (source: stone/wood/bone/metal/clay/silk/ice/glass; impl: carved/woven/cast/forged/grown/etched; rel_type: ally/rival/kin/trade/debt/myth)
-- Sequences added for `characters`, `settings`, `physical_environments`, `materials`, `relationship_effects`
-- `world_tick()` PL/pgSQL function (SECURITY DEFINER):
-
-| du modulus | Action |
-|---|---|
-| every tick | `settings.time_unit +1`, `characters.age +1` (active, positioned) |
-| du % 3 | minor material tick: `materials.durability -1`, `age +1` |
-| du % 50 | spawn age-0 character at setting origin + random relationship |
-| du % 80 | major material change: random source + implementation from `proc_words` |
-| tu % 100 | environment cycle: randomise temperature/density/hydration |
-| tu % 500 | spawn new random setting (offset from parent) + seed physical_environment |
-| always | `pg_notify('world_tick', json)` broadcast |
-
-- `pg_cron` job `'world-tick'` — schedule `'* * * * *'` — active ✅
-
-#### Smoke test (manual `SELECT public.world_tick()`)
-- `world_tick_state.duration_unit` 0 → 1 ✅
-- `settings.time_unit` 0 → 1 ✅
-
-#### Frontend (`app.js`)
-- Added `supabase.channel('world-tick')` subscribing to `postgres_changes` on `world_tick_state` UPDATE
-- On each tick: updates status bar (`du: N`), calls `updateGrid()` to reload entity positions (new spawned chars, moved entities)
-
-**Key decisions:**
-- `world_tick_state` UPDATE is the Realtime trigger — avoids needing `pg_net` for HTTP callbacks; Supabase Realtime picks up the row change automatically
-- `proc_words` is a stable seed table, not hardcoded in the function, so vocabulary can be extended via future migrations without changing the function
-- du (duration units, real-time ticks) vs tu (time_unit, story-time per setting) are tracked separately — du drives spawn/material schedules, tu drives environment/world-expansion schedules
-- Characters spawn only if a matching `grid_cells` row exists at the setting origin; silent no-op otherwise (safe until grid seeding is complete)
+See prior PROGRESS.md entry for full details. Summary:
+- `world_tick_state` singleton, `proc_words` vocabulary table
+- `world_tick()` function: per-tick aging, material decay, char spawn (du%50), material change (du%80), env cycle (tu%100), setting spawn (tu%500)
+- `pg_cron` job `world-tick` — `* * * * *` — ACTIVE
+- Frontend: `world-tick` Realtime channel on `world_tick_state`
 
 ---
 
-### 🔼 Next: Milestone 10 — World Seeding UI + Grid Cell Bootstrap
+### ✅ Milestone 10 — World Seeding + Grid Bootstrap
+**Date:** 2026-05-10 | **Status:** Complete
+**Migration:** `010_world_seeding` | **Commit:** `5190083`
+
+**What was built:**
+
+#### DB (migration 010)
+- Added `DEFAULT nextval(...)` sequence to `grid_cells.grid_cell_id`
+- Added `DEFAULT extract(epoch FROM now())` to `entity_positions.timestamp_start` (was NOT NULL, no default — caused first apply attempt to fail)
+- Seeded **7×7×1** `grid_cells` for genesis setting (x: -3→3, y: -3→3, z=0), all capacity=10, expansion_state='stable'
+- `entity_positions` seeded:
+  - character 1 @ (0,0,0) — genesis character, size 3
+  - character 7 @ (1,1,0) — test character, size 2
+  - material 101 @ (-1,0,0) — carved stone, size 2
+  - setting 1 @ (0,0,0) — setting node, size 7
+- `physical_environments` row for setting 1: temp=18, density=60, hydration=70, pop=2
+- `seed_setting_grid(setting_id, radius=3)` helper — called by `world_tick()` on new setting spawns
+- `world_tick()` patched to use `seed_setting_grid` + supply `timestamp_start` on all `entity_positions` inserts
+- `REPLICA IDENTITY FULL` on `entity_positions` (enables Realtime change streaming)
+
+#### Smoke test results
+- `grid_cells` count: 49 (7×7) ✅
+- Active entity_positions: char1@(0,0,0), char7@(1,1,0), material101@(-1,0,0), setting1@(0,0,0) ✅
+- `world_tick_state.duration_unit`: 8 (pg_cron running live) ✅
+
+#### Frontend
+- `grid-renderer.js`: `loadEntityPositions()` now fetches joined `grid_cells(x,y,z,setting_id)`; derives per-setting bounding boxes and draws isometric diamond outline per setting (dashed, labelled `S1`)
+- `index.html`: added `#world-time` span in footer
+- `app.js`: `loadWorldTime()` queries `world_tick_state` + `settings` on load; updates `#world-time` as `tu: N · du: N`; new `entity-positions` Realtime channel (postgres_changes `*`) triggers `loadEntityPositions()` live
+
+**Key decisions:**
+- Action buttons moved outside `showGame()` scope (fixed a bug where they'd only work after sign-in event, not on page reload with existing session)
+- Setting boundary derived client-side from entity_positions join data — no extra RPC needed
+- `entity_positions` Realtime channel now fires on any insert/update/delete, so character spawns from `world_tick()` redraw the canvas automatically
+
+---
+
+### 🔼 Next: Milestone 11 — Travel Action + Grid Movement
 **Status:** Not started
 
-**Goal:** Let the game actually show the world. Right now the grid canvas is mostly empty because `grid_cells` has no rows and characters have no positions seeded beyond fixtures. Milestone 10 wires it all together.
+**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn't update `entity_positions`.
 
 **Scope:**
-- [ ] Seed `grid_cells` for genesis setting (e.g. 5×5×1 grid around origin)
-- [ ] Place genesis seed character (character_id=1) at origin grid cell
-- [ ] Add a `seed-world` Edge Function or SQL migration that bootstraps a fresh world on demand
-- [ ] Frontend: show setting name + `time_unit` / `duration_unit` in footer
-- [ ] Frontend: grid renderer draws setting boundary outline (isometric bounding box)
+- [ ] Edge Function `resolve-turn`: on `travel` action, close current `entity_positions` row (`timestamp_end = now()`), insert new row at target cell
+- [ ] Determine target cell: adjacent cell in direction encoded in action payload, or explicit `target_cell_id`
+- [ ] Frontend: Travel button opens a direction picker (N/S/E/W or click-on-grid) before submitting
+- [ ] Validate: target cell must exist, have capacity, be in same setting (cross-setting travel = future milestone)
+- [ ] `entity_positions` change fires Realtime → grid redraws automatically (already wired in M10)
 
 ---
 
@@ -95,10 +104,11 @@ All prior milestones complete. Schema, Edge Function, frontend scaffold, Realtim
 | Migration 007 | `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions |
 | Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
 | Migration 009 | `009_natural_progression_loop` — world_tick_state, proc_words, world_tick(), pg_cron |
+| Migration 010 | `010_world_seeding` — 7x7 grid_cells, entity_positions seed, seed_setting_grid(), REPLICA IDENTITY |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
-| Genesis seed | `settings` row `id=1` required before any event insert |
+| Genesis seed | `settings` row `id=1`, `origin=(0,0,0)`, `grid_cells` 7x7 seeded |
 | Player A (dev) | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` — `dev@chronicle.local` |
 | Player B (stub) | `00000000-0000-0000-0000-000000000002` |
 | Test player | `d30fe4d9-a9f3-43a2-947d-30c8d9d2cdd5` — `test@chroincle.local` |
