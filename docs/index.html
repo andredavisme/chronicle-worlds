@@ -159,29 +159,34 @@
       <span id="branch-info">branch: root</span>
     </footer>
 
-    <!-- Supabase JS via CDN (no build step needed) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <!--
+      Using unpkg instead of jsDelivr — jsDelivr is blocked by browser Tracking Prevention.
+      The UMD bundle exposes the global `supabase` (not `supabase_js`).
+      Our client variable is named `sb` to avoid the name clash.
+    -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
     <script>
-      // ─── Supabase client ──────────────────────────────────────────
+      // ─── Supabase client ─────────────────────────────────────────
+      // UMD bundle exposes global `supabase` — we alias our client as `sb`
       const SUPABASE_URL = 'https://hhyhulqngdkwsxhymmcd.supabase.co'
       const SUPABASE_KEY = 'sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI'
-      const supabase = supabase_js.createClient(SUPABASE_URL, SUPABASE_KEY)
+      const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
 
-      // ─── DOM refs ─────────────────────────────────────────────────
-      const authPanel      = document.getElementById('auth-panel')
-      const gameArea       = document.getElementById('game-area')
-      const sidebar        = document.getElementById('sidebar')
-      const statusEl       = document.getElementById('status')
-      const cooldownEl     = document.getElementById('cooldown-display')
-      const playerInfoEl   = document.getElementById('player-info')
-      const turnInfoEl     = document.getElementById('turn-info')
-      const branchInfoEl   = document.getElementById('branch-info')
+      // ─── DOM refs ───────────────────────────────────────────────
+      const authPanel       = document.getElementById('auth-panel')
+      const gameArea        = document.getElementById('game-area')
+      const sidebar         = document.getElementById('sidebar')
+      const statusEl        = document.getElementById('status')
+      const cooldownEl      = document.getElementById('cooldown-display')
+      const playerInfoEl    = document.getElementById('player-info')
+      const turnInfoEl      = document.getElementById('turn-info')
+      const branchInfoEl    = document.getElementById('branch-info')
       const chronicleListEl = document.getElementById('chronicle-list')
-      const canvas         = document.getElementById('grid-canvas')
-      const signOutBtn     = document.getElementById('auth-sign-out')
+      const canvas          = document.getElementById('grid-canvas')
+      const signOutBtn      = document.getElementById('auth-sign-out')
 
-      // ─── Grid renderer ────────────────────────────────────────────
+      // ─── Grid renderer ─────────────────────────────────────────
       let ctx
       let entities = []
       const TILE_W = 48, TILE_H = 24
@@ -207,14 +212,14 @@
       }
 
       async function loadEntityPositions() {
-        const { data, error } = await supabase
+        const { data, error } = await sb
           .from('entity_positions')
           .select('entity_type, entity_id, effective_size, grid_cells(x, y, z)')
           .is('timestamp_end', null)
         if (error) { console.error('entity_positions:', error); return }
         entities = (data || []).map(row => ({
-          entity_type: row.entity_type,
-          entity_id:   row.entity_id,
+          entity_type:    row.entity_type,
+          entity_id:      row.entity_id,
           effective_size: row.effective_size,
           x: row.grid_cells?.x ?? 0,
           y: row.grid_cells?.y ?? 0,
@@ -228,7 +233,6 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         const cx = canvas.width / 2
         const cy = canvas.height / 2
-
         for (const e of entities) {
           const { sx, sy } = isoProject(e.x, e.y, e.z)
           const r = Math.max(4, (e.effective_size || 1) * 6)
@@ -242,7 +246,6 @@
           ctx.font = '9px Courier New'
           ctx.fillText(`${e.entity_type[0].toUpperCase()}${e.entity_id}`, cx + sx + r + 2, cy + sy + 3)
         }
-
         if (entities.length === 0) {
           ctx.fillStyle = '#2a2a3a'
           ctx.font = '12px Courier New'
@@ -252,9 +255,9 @@
         }
       }
 
-      // ─── Chronicle ────────────────────────────────────────────────
+      // ─── Chronicle ──────────────────────────────────────────────
       async function loadChronicle() {
-        const { data, error } = await supabase
+        const { data, error } = await sb
           .from('chronicle')
           .select('chronicle_id, timestamp, turn_number, branch_id, event_id, events(event_type, duration_units)')
           .order('timestamp', { ascending: false })
@@ -271,8 +274,8 @@
         }
         chronicleListEl.innerHTML = entries.map(entry => {
           const branchClass = entry.branch_id > 0 ? `branch-${Math.min(entry.branch_id, 3)}` : ''
-          const eventType = entry.events?.event_type ?? 'unknown'
-          const duration  = entry.events?.duration_units ?? '?'
+          const eventType   = entry.events?.event_type ?? 'unknown'
+          const duration    = entry.events?.duration_units ?? '?'
           const branchLabel = entry.branch_id > 0 ? ` [branch ${entry.branch_id}]` : ''
           const t = entry.timestamp?.toFixed ? entry.timestamp.toFixed(2) : entry.timestamp
           return `<div class="chronicle-entry ${branchClass}">
@@ -291,10 +294,10 @@
         chronicleListEl.prepend(div)
       }
 
-      // ─── Turn manager ─────────────────────────────────────────────
-      const COOLDOWN_MS = 60_000
+      // ─── Turn manager ───────────────────────────────────────────
+      const COOLDOWN_MS      = 60_000
       const DEFAULT_SETTING_ID = 1
-      let cooldownEnd = 0
+      let cooldownEnd   = 0
       let cooldownTimer = null
 
       function startCooldown() {
@@ -302,12 +305,8 @@
         clearInterval(cooldownTimer)
         cooldownTimer = setInterval(() => {
           const rem = Math.ceil((cooldownEnd - Date.now()) / 1000)
-          if (rem <= 0) {
-            clearInterval(cooldownTimer)
-            cooldownEl.textContent = ''
-          } else {
-            cooldownEl.textContent = `cooldown: ${rem}s`
-          }
+          if (rem <= 0) { clearInterval(cooldownTimer); cooldownEl.textContent = '' }
+          else          { cooldownEl.textContent = `cooldown: ${rem}s` }
         }, 1000)
       }
 
@@ -317,22 +316,21 @@
           cooldownEl.textContent = `cooldown: ${Math.ceil((cooldownEnd - now) / 1000)}s`
           return
         }
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: { session } } = await sb.auth.getSession()
         if (!session) { statusEl.textContent = 'not authenticated'; return }
 
-        const { data, error } = await supabase.functions.invoke('resolve-turn', {
+        const { data, error } = await sb.functions.invoke('resolve-turn', {
           body: {
             action,
             player_id: session.user.id,
             details: {
-              setting_id: DEFAULT_SETTING_ID,
+              setting_id:       DEFAULT_SETTING_ID,
               submit_timestamp: now / 1000,
-              sequence_index: Math.floor(Math.random() * 1_000_000),
+              sequence_index:   Math.floor(Math.random() * 1_000_000),
               ...details,
             },
           },
         })
-
         if (error) throw error
 
         if (data.status === 'resolved') {
@@ -345,12 +343,12 @@
         return data
       }
 
-      // ─── Auth ─────────────────────────────────────────────────────
+      // ─── Auth ──────────────────────────────────────────────────
       document.getElementById('auth-sign-in').addEventListener('click', async () => {
         const email    = document.getElementById('auth-email').value.trim()
         const password = document.getElementById('auth-password').value
         document.getElementById('auth-error').textContent = ''
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        const { error } = await sb.auth.signInWithPassword({ email, password })
         if (error) document.getElementById('auth-error').textContent = error.message
       })
 
@@ -358,25 +356,21 @@
         const email    = document.getElementById('auth-email').value.trim()
         const password = document.getElementById('auth-password').value
         document.getElementById('auth-error').textContent = ''
-        const { error } = await supabase.auth.signUp({ email, password })
+        const { error } = await sb.auth.signUp({ email, password })
         if (error) document.getElementById('auth-error').textContent = error.message
         else document.getElementById('auth-error').textContent = 'Check your email to confirm account.'
       })
 
-      signOutBtn.addEventListener('click', () => supabase.auth.signOut())
+      signOutBtn.addEventListener('click', () => sb.auth.signOut())
 
-      // Enter key on password field triggers sign-in
       document.getElementById('auth-password').addEventListener('keydown', e => {
         if (e.key === 'Enter') document.getElementById('auth-sign-in').click()
       })
 
-      // ─── Auth state machine ───────────────────────────────────────
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          showGame(session.user)
-        } else {
-          showAuth()
-        }
+      // ─── Auth state machine ────────────────────────────────────
+      sb.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) showGame(session.user)
+        else               showAuth()
       })
 
       async function showGame(user) {
@@ -384,16 +378,14 @@
         gameArea.style.display   = 'block'
         sidebar.style.display    = 'flex'
         signOutBtn.style.display = 'inline-block'
-        statusEl.textContent = `connected as ${user.email}`
+        statusEl.textContent     = `connected as ${user.email}`
         playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
 
         initGridRenderer()
         await loadEntityPositions()
         await loadChronicle()
 
-        // Action buttons
         document.querySelectorAll('.action-btn').forEach(btn => {
-          // Remove any previous listeners by cloning
           const fresh = btn.cloneNode(true)
           btn.parentNode.replaceChild(fresh, btn)
           fresh.addEventListener('click', async () => {
@@ -410,8 +402,7 @@
           })
         })
 
-        // Realtime
-        supabase.channel('turns')
+        sb.channel('turns')
           .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
             loadEntityPositions()
             loadChronicle()
