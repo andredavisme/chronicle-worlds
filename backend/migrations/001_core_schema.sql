@@ -1,6 +1,8 @@
 -- 001_core_schema.sql
 -- Chronicle Worlds: Core world simulation tables
 -- No auth or player identity — pure game entity layer
+-- ⚠️ Verified against live DB 2026-05-10: events.setting_id is NOT NULL in practice
+--    (smoke test confirmed a seed settings row is required before any event insert)
 
 CREATE TABLE settings (
   setting_id   INTEGER PRIMARY KEY,
@@ -55,7 +57,7 @@ CREATE TABLE materials (
 
 CREATE TABLE events (
   event_id         INTEGER PRIMARY KEY,
-  setting_id       INTEGER REFERENCES settings(setting_id),
+  setting_id       INTEGER NOT NULL REFERENCES settings(setting_id),  -- NOT NULL: every event belongs to a setting
   age              INTEGER NOT NULL DEFAULT 0,
   duration_units   INTEGER NOT NULL DEFAULT 0,
   start_timestamp  REAL    NOT NULL,
@@ -106,13 +108,13 @@ CREATE TABLE attribute_modifiers (
 );
 
 CREATE TABLE relationship_effects (
-  relationship_id   INTEGER PRIMARY KEY,
-  relationship_type TEXT    NOT NULL,
-  source_entity_type TEXT   NOT NULL,
-  source_entity_id  INTEGER NOT NULL,
-  target_entity_type TEXT   NOT NULL,
-  target_entity_id  INTEGER NOT NULL,
-  effect_json       TEXT    NOT NULL,
-  start_timestamp   REAL    NOT NULL,
-  end_timestamp     REAL
+  relationship_id    INTEGER PRIMARY KEY,
+  relationship_type  TEXT    NOT NULL,
+  source_entity_type TEXT    NOT NULL,
+  source_entity_id   INTEGER NOT NULL,
+  target_entity_type TEXT    NOT NULL,
+  target_entity_id   INTEGER NOT NULL,
+  effect_json        TEXT    NOT NULL,
+  start_timestamp    REAL    NOT NULL,
+  end_timestamp      REAL
 );

@@ -43,6 +43,7 @@ All 10 base tables were created in the Supabase project. These form the world si
 **Key decisions:**
 - All PKs are integers; `chronicle` is the central join table
 - `events.resolution_state` defaults to `'pending'` and is the primary game-loop state driver
+- `events.setting_id` is NOT NULL in the live DB — every event must belong to a setting; a genesis `settings` row must be seeded before any turn can be submitted
 - No auth or player identity in this migration — that comes in Milestone 2
 
 ---
@@ -88,6 +89,7 @@ Extended the core schema with player identity, turn mechanics, time-travel branc
 **Status:** Complete
 **Deployed via:** Supabase MCP (`deploy_edge_function`)
 **Function ID:** `a68468fa-a326-4f75-9d51-72a73fa8e9c2`
+**Current version:** v2 (bug fix: `event.eventid` → `event.event_id`)
 **Builds on:** Milestones 1 & 2 (all tables, `turn_queue` view, `players`, `branches`, `chronicle`)
 
 **What was done:**
@@ -99,7 +101,7 @@ Deployed the `resolve-turn` Supabase Edge Function at `functions/resolve-turn/in
 3. Resolve the player's `controlled_character_id` from the `players` table
 4. Compute `duration_units` from `DURATION_MAP` (or `computeTravelDuration()` for `travel` action)
 5. Check branch fork limit — if `details.branch_fork` is set, count `branches WHERE parent_branch_id = X`; reject with `409` if ≥ 3; otherwise insert new branch row
-6. Insert into `events` with `resolution_state = 'pending'`
+6. Insert into `events` with `resolution_state = 'pending'`; **`setting_id` is required** — client must pass `details.setting_id`
 7. Call `applyModifiers()` — inserts one `attribute_modifiers` row per action type
 8. Insert into `chronicle` (links `event_id`, `character_id`, `player_id`, `branch_id`, timestamps)
 9. Update `events.resolution_state = 'resolved'`
@@ -125,13 +127,44 @@ duration = max(1, round(base * charPenalty / matBonus * inspBonus))
 **Key decisions:**
 - Uses `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS for server-side writes; RLS still governs all client reads
 - JWT verification enabled (`verify_jwt: true`) — client must pass a valid Supabase Auth token
-- `event.eventid` (snake_case from DB) used as PK reference — verify column name matches schema if errors arise
+- `event.event_id` is the correct PK field returned from the insert `.select('event_id, turn_number')` — v1 had a bug using `event.eventid` which silently broke modifier inserts and resolution updates
 - Chronicle insert triggers `advance_turn()` automatically (Milestone 2 trigger)
 - Branch fork insert happens before event insert so `branch_id` is available
 
+**Fixes applied:**
+- v1 → v2: `event.eventid` → `event.event_id` (all three references: modifier insert, chronicle insert, resolution update)
+- Migrations 001 and 002 were applied via MCP but never committed; retroactively added to `backend/migrations/` and verified against live schema
+- `events.setting_id` NOT NULL discovered during smoke test — corrected in `001_core_schema.sql` and documented here
+
+---
+
+### ✅ Milestone 3a — Smoke Test: Full Turn Pipeline
+**Date:** 2026-05-10
+**Status:** Complete
+**Depends on:** Milestone 3
+
+**What was tested:**
+Full end-to-end turn pipeline simulated directly in SQL (pg_net not available on this project, so HTTP invoke was not used; JWT auth gate also prevents direct curl without a real auth user).
+
+**Test data:**
+- `settings` row: `setting_id=1`, genesis at `(0,0,0)`
+- `characters` row: `character_id=1`, `health=10`, all other stats at 0
+- `players` row: `player_id=00000000-0000-0000-0000-000000000001`, `controlled_character_id=1`
+
+**Steps verified:**
+1. ✅ `turn_queue` — empty for test player (no pending turns blocking queue)
+2. ✅ `events` insert — `exchange_information`, `duration_units=10`, `resolution_state='pending'`
+3. ✅ `attribute_modifiers` insert — `inspiration +3` applied to `character_id=1`
+4. ✅ `chronicle` insert — `turn_number=1` auto-set by `advance_turn()` trigger, `branch_id=0`
+5. ✅ `events` update — `resolution_state` changed to `'resolved'`
+
+**Schema finding recorded:**
+- `events.setting_id` is NOT NULL in the live DB — design spec had it as nullable. Every event requires a setting context. The genesis `settings` row (id=1) must exist before any turn is submitted. Updated `001_core_schema.sql` to reflect this.
+
 **What to do next:**
-- Milestone 4: Build the frontend scaffold (Vite + JS, GitHub Pages)
-- First test: Insert a `players` row + `characters` row manually in Supabase, then invoke the function via `curl` or Supabase dashboard
+- Milestone 4: Build the frontend scaffold
+- When a real Supabase Auth user exists, the full HTTP invoke can be tested via `supabase.functions.invoke('resolve-turn', ...)` from the client
+- The test data rows (`setting_id=1`, `character_id=1`, `player_id=00000000...0001`) remain in the DB as seed fixtures
 
 ---
 
@@ -141,7 +174,7 @@ duration = max(1, round(base * charPenalty / matBonus * inspBonus))
 
 ### 🔲 Milestone 4 — Frontend: GitHub Pages Scaffold
 **Status:** Not started
-**Depends on:** Milestone 3 (Edge Function endpoint live ✅)
+**Depends on:** Milestone 3 (Edge Function endpoint live ✅), Milestone 3a (smoke test passed ✅)
 
 **What to build:**
 Initialize a Vite + JS project in `/frontend/` and deploy via GitHub Pages.
@@ -161,12 +194,14 @@ frontend/
 
 **Key patterns:**
 - `submitAction()` captures `submit_timestamp = Date.now() / 1000` before calling `supabase.functions.invoke('resolve-turn', ...)`
+- `details.setting_id` **must be included** in every action payload — `events.setting_id` is NOT NULL
 - Cooldown is client-enforced (1 real minute); it is a UX mechanism, not a server lock
 - Auth via Supabase Auth (`auth.uid()` must match `player_id` for RLS to pass)
 
 **Reference:**
 - Client patterns: Developer Handoff → Frontend → Key Client Patterns
-- Supabase project URL and anon key: andredavisme's Project (`hhyhulqngdkwsxhymmcd`)
+- Supabase project URL: `https://hhyhulqngdkwsxhymmcd.supabase.co`
+- Anon key: see Supabase dashboard (publishable key preferred)
 
 ---
 
@@ -222,6 +257,7 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 - [ ] RLS isolation: confirm player A cannot read player B's chronicle rows
 - [ ] Cooldown bypass: attempt client-side cooldown skip — verify server `submit_timestamp` race logic still resolves correctly
 - [ ] Natural progression: verify environment cycles (every 100u), material changes (80u major / 3 durations minor), population spawns (every 50 durations)
+- [ ] `setting_id` required: verify Edge Function returns 500 if client omits `details.setting_id`
 
 ---
 
@@ -245,9 +281,13 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 | GitHub Repo | [andredavisme/chronicle-worlds](https://github.com/andredavisme/chronicle-worlds) |
 | Supabase Project | andredavisme's Project (`hhyhulqngdkwsxhymmcd`) |
 | Region | `us-west-2` |
-| Migration 001 | `001_core_schema` — 10 base tables |
+| Project URL | `https://hhyhulqngdkwsxhymmcd.supabase.co` |
+| Migration 001 | `001_core_schema` — 10 base tables; `events.setting_id` NOT NULL |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
-| Edge Function | `resolve-turn` (ID: `a68468fa-a326-4f75-9d51-72a73fa8e9c2`, v1, ACTIVE) |
+| Migration 003 | `003_developer_proposals` — proposal intake tables (separate from game logic) |
+| Edge Function | `resolve-turn` (ID: `a68468fa`, v2, ACTIVE) |
+| Genesis seed | `settings` row `id=1` required before any event insert |
+| Test fixtures | `character_id=1`, `player_id=00000000-0000-0000-0000-000000000001` (dev only) |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 |
 | Action durations | Exchange Info=10u, Resolve Conflict=7u, Introduce Conflict=5u, Exchange Material=3u, Travel=calculated |
