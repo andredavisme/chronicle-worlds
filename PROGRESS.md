@@ -51,13 +51,15 @@ This document is the **single source of truth** for development progress. Each m
 ### ✅ Milestone 3 — Backend: Edge Function `resolve-turn`
 **Date:** 2026-05-10
 **Status:** Complete
-**Function ID:** `a68468fa-a326-4f75-9d51-72a73fa8e9c2` (v2, ACTIVE)
+**Function ID:** `a68468fa-a326-4f75-9d51-72a73fa8e9c2` (v3, ACTIVE)
 
 **Logic:** validate → queue check → branch check → insert event → apply modifiers → insert chronicle → resolve → broadcast → return.
 
 **Modifier map:** Exchange Info=`inspiration+3` · Resolve Conflict=`health+3` · Introduce Conflict=`health-3` · Exchange Material=`wealth+3` · Travel=duration only
 
-**Key fix (v1→v2):** `event.eventid` → `event.event_id`
+**Key fixes:**
+- v1→v2: `event.eventid` → `event.event_id`
+- v2→v3: `verify_jwt: false` + manual JWT validation inside handler — Supabase gateway was rejecting OPTIONS preflight before function ran, causing CORS block from GitHub Pages
 
 ---
 
@@ -89,10 +91,16 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 
 ### ✅ Milestone 7 — Testing: Multiplayer & Edge Cases
 **Date:** 2026-05-10
-**Status:** Complete — all DB-side tests verified live
+**Status:** Complete — all DB-side and browser tests verified live
 **Migrations:** `004_milestone7_tests` (ROLLBACK/reference) · `005_persist_test_fixtures` (COMMIT)
 
 **Live DB results:** ✅ Genesis setting · ✅ advance_turn trigger · ✅ Queue clear · ✅ Branch limit (3) · ✅ Travel formula · ✅ RLS isolation data
+
+**Browser tests (2026-05-10, Session 2):**
+- ✅ Sign in as Player A → submit action → chronicle updated + cooldown running via Realtime
+- ✅ Incognito as `test@chroincle.local` → Player A rows hidden (RLS confirmed)
+- ✅ 4th branch fork → `409 Branch fork limit reached (max 3)`
+- ✅ Submit without `setting_id` → `500` Postgres NOT NULL constraint error
 
 **Persisted fixture reference:**
 | Fixture | Value |
@@ -101,32 +109,38 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 | Player B | `00000000-0000-0000-0000-000000000002` (stub) |
 | Genesis setting | `setting_id=1`, origin `(0,0,0)` |
 | Player A branches | 3 forks from root (at cap) |
-
-**Remaining client-side checks (manual browser):**
-- [ ] Sign in as Player A → submit action → confirm chronicle + cooldown via Realtime
-- [ ] Incognito as different user → confirm Player A rows hidden (RLS)
-- [ ] Attempt 4th branch fork → confirm `409` from Edge Function
-- [ ] Submit without `setting_id` → confirm `500`
+| Test player | `d30fe4d9-a9f3-43a2-947d-30c8d9d2cdd5` (`test@chroincle.local`, character_id=7) |
 
 ---
 
-### 🔄 Milestone 8 — Polish, Docs & Deploy Pipeline
+### ✅ Milestone 8a — Session 2 Infrastructure Fixes
 **Date:** 2026-05-10
-**Status:** In progress
+**Status:** Complete
 
-**Completed this session:**
-- ✅ `README.md` — full rewrite: overview, gameplay, actions table, time/branching rules, tech stack, local dev, deploy instructions, project structure, key design decisions (commit `0deb5c0`)
-- ✅ Live site unblocked — `docs/index.html` created as single-file CDN frontend (no Vite build needed); GitHub Pages now serves the game at [andredavisme.github.io/chronicle-worlds](https://andredavisme.github.io/chronicle-worlds/)
-- ✅ CI workflow fixed — `deploy.yml` no longer triggers on `docs/**` pushes; prevents Vite from overwriting hand-built file (commit `3b69d56`)
-- ✅ CDN / name clash fixed — swapped jsDelivr → unpkg (Tracking Prevention); renamed `supabase` → `sb` to fix UMD global `SyntaxError` (commit `d098380`)
-- ✅ Auth storage fixed — `sessionStorage` instead of `localStorage`; silences all Tracking Prevention warnings (commit `e5d2a19`)
-- ✅ Favicon added — inline SVG data URI; eliminates `favicon.ico` 404 (commit `e5d2a19`)
-- ✅ Login confirmed working in browser ✅
+**Problems found and fixed during browser testing:**
+
+1. **CORS block on `resolve-turn`** — `verify_jwt: true` caused Supabase gateway to reject OPTIONS preflight with no CORS headers. Fixed: redeployed as v3 with `verify_jwt: false` + manual `anonClient.auth.getUser()` validation inside the handler. OPTIONS now returns 200.
+
+2. **`Player not found` 500** — 3 of 4 auth users had no `players` row. Fixed: `006_auto_provision_players` migration backfilled all existing users and added `trg_provision_player` trigger for future signups.
+
+3. **`null value in column "event_id"` 500** — `events`, `chronicle`, `attribute_modifiers`, `entity_positions` PKs had no sequences/defaults. Fixed: `007_add_pk_sequences` migration added sequences to all four.
+
+4. **`Database error creating new user`** — RLS on `characters` and `players` blocked the trigger even with `SECURITY DEFINER`. Fixed: `008_rls_policies_and_trigger_fix` added `service_role` INSERT policies on both tables + `SET search_path = public` on trigger function.
+
+**Migrations applied this session:**
+- `006_auto_provision_players` — player provisioning trigger + backfill
+- `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions
+- `008_rls_policies_and_trigger_fix` — RLS policies for service_role + player read/update
+
+---
+
+### 🔄 Milestone 8b — Polish & Scale
+**Status:** In progress
 
 **Remaining:**
 - [ ] Mobile responsiveness for canvas grid
-- [ ] Client-side Milestone 7 browser tests (4 checks above)
 - [ ] Supabase Pro / scale path notes
+- [ ] Add migration SQL files 006–008 to `backend/migrations/` in repo
 
 ---
 
@@ -142,11 +156,15 @@ Full Vite + JS frontend in `/frontend/`. Five modules: `supabase-client.js`, `tu
 | Migration 003 | `003_developer_proposals` |
 | Migration 004 | `004_milestone7_tests` (ROLLBACK; reference only) |
 | Migration 005 | `005_persist_test_fixtures` (COMMIT, 2026-05-10) |
-| Edge Function | `resolve-turn` (ID: `a68468fa`, v2, ACTIVE) |
+| Migration 006 | `006_auto_provision_players` — player provisioning trigger + backfill |
+| Migration 007 | `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions |
+| Migration 008 | `008_rls_policies_and_trigger_fix` — RLS policies for service_role + player read/update |
+| Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
 | Player A (dev) | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` — `dev@chronicle.local` |
 | Player B (stub) | `00000000-0000-0000-0000-000000000002` |
+| Test player | `d30fe4d9-a9f3-43a2-947d-30c8d9d2cdd5` — `test@chroincle.local` |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 (enforced in Edge Function) |
 | Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated |
