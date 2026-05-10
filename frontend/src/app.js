@@ -76,7 +76,6 @@ async function showGame(user) {
     },
   })
 
-  // Player turn broadcasts
   supabase.channel('turns')
     .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
       updateGrid(payload)
@@ -87,7 +86,6 @@ async function showGame(user) {
     })
     .subscribe()
 
-  // World tick — update time display + reload grid
   supabase.channel('world-tick')
     .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
@@ -99,7 +97,6 @@ async function showGame(user) {
         })
     .subscribe()
 
-  // Live entity spawn/move redraws
   supabase.channel('entity-positions')
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'entity_positions' },
