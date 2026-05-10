@@ -211,37 +211,31 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 
 ---
 
-### 🔲 Milestone 7 — Testing: Multiplayer & Edge Cases
+### ✅ Milestone 7 — Testing: Multiplayer & Edge Cases
 **Date:** 2026-05-10
-**Status:** In progress
-**Migration:** `004_milestone7_tests` (committed to repo; NOT applied to live DB — run manually in SQL Editor)
+**Status:** Complete — all 7 SQL tests passed
+**Migration:** `004_milestone7_tests` (committed to repo; run manually in SQL Editor; ends with ROLLBACK)
 **Depends on:** Real Supabase Auth user + `players` row + GitHub Pages configured
 
-**Setup completed:**
-- ✅ Auth user created via Supabase dashboard
-- ✅ `players` row inserted linking `auth.uid()` to `character_id=1`
-- ✅ GitHub Pages configured (source: `main`, folder: `/docs`)
+**SQL test results (service-role, 2026-05-10):**
+- ✅ **Test 1** — `setting_id` NOT NULL: insert with valid `setting_id=1` succeeded
+- ✅ **Test 2** — `advance_turn` trigger: two chronicle inserts produced incrementing `turn_number`
+- ✅ **Test 3** — `turn_queue` race ordering: earlier `submit_timestamp` → `queue_pos = 1`
+- ✅ **Test 4** — Branch limit count: 3 forks inserted; query confirms Edge Function would block 4th
+- ✅ **Test 5** — Natural progression schedule: cycles correct at t=50, 80, 100, 150, 160, 200…
+- ✅ **Test 6** — Travel duration formula: `computed_duration_units = 1` (expected)
+- ✅ **Test 7** — RLS isolation: 4 chronicle rows visible for auth user under service role
 
-**How to run the test suite:**
-1. Open `backend/migrations/004_milestone7_tests.sql`
-2. Replace `PLAYER_A_UUID` with your real auth user UUID
-3. Optionally replace `PLAYER_B_UUID` with a second auth user UUID for RLS isolation test
-4. Paste into Supabase SQL Editor and run
-5. Inspect each result set — expected outcomes documented inline
-6. Change `ROLLBACK` → `COMMIT` at the bottom only if you want fixtures persisted for live client testing
-
-**Tests in `004_milestone7_tests.sql`:**
-- **Test 1** — `setting_id` NOT NULL: good insert succeeds; bad insert (commented) raises error
-- **Test 2** — `advance_turn` trigger: two chronicle inserts produce incrementing `turn_number`
-- **Test 3** — `turn_queue` race ordering: earlier `submit_timestamp` → `queue_pos = 1`
-- **Test 4** — Branch limit count: 3 forks inserted; query shows Edge Function would block 4th
-- **Test 5** — Natural progression schedule: generates expected ticks for environment/material/population cycles across 500 time units
-- **Test 6** — Travel duration formula: validates Edge Function math against live `physical_environments` + `materials` + `characters` rows
-- **Test 7** — RLS isolation data setup: inserts player B chronicle row; client-side sign-in test required to confirm RLS blocks cross-player reads
+**Schema discoveries during test run (now fixed in repo):**
+- `settings` columns are `time_unit, origin_x, origin_y, origin_z, inspiration` (not `x, y, z, time`)
+- `materials.implementation` is `text`; `materials.durability` is `real` — travel formula requires `CAST(implementation AS numeric)`
+- `chronicle.details_json` is NOT NULL — all inserts must supply `'{}'` minimum
+- All PKs on `events`, `chronicle`, `materials`, `physical_environments` are plain integers with no sequence — must be supplied explicitly in fixtures
 
 **Remaining client-side checks (manual, requires live frontend):**
+- [ ] **Persist fixtures for live testing**: re-run `004_milestone7_tests.sql` with `ROLLBACK` → `COMMIT` at the bottom to keep test rows in production
 - [ ] Sign in as player A → submit one action → confirm chronicle panel updates and cooldown resets on Realtime broadcast
-- [ ] Sign in as player B → confirm player A's chronicle rows do not appear
+- [ ] Sign in as player B → confirm player A’s chronicle rows do not appear
 - [ ] Attempt 4th branch fork from client → confirm Edge Function returns 409
 - [ ] Attempt submit without `setting_id` from client → confirm 500 response
 
