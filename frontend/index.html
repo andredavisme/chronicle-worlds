@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chronicle Worlds</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0a0a0f;
+        color: #c8c8d4;
+        font-family: 'Courier New', monospace;
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        grid-template-rows: auto 1fr auto;
+        height: 100vh;
+        overflow: hidden;
+      }
+      header {
+        grid-column: 1 / -1;
+        padding: 12px 20px;
+        border-bottom: 1px solid #2a2a3a;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      header h1 { font-size: 1rem; color: #8888cc; letter-spacing: 2px; }
+      #status { font-size: 0.75rem; color: #555; margin-left: auto; }
+      #cooldown-display {
+        font-size: 0.75rem;
+        color: #44aa66;
+        min-width: 80px;
+        text-align: right;
+      }
+      #auth-panel {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 40px;
+      }
+      #auth-panel input {
+        background: #111;
+        border: 1px solid #333;
+        color: #c8c8d4;
+        padding: 8px 12px;
+        font-family: inherit;
+        width: 260px;
+      }
+      #auth-panel button {
+        background: #2a2a6a;
+        border: 1px solid #4444aa;
+        color: #aaaaee;
+        padding: 8px 24px;
+        cursor: pointer;
+        font-family: inherit;
+        letter-spacing: 1px;
+      }
+      #auth-panel button:hover { background: #3a3a8a; }
+      #auth-error { color: #cc4444; font-size: 0.8rem; }
+      #game-area { display: none; grid-column: 1; overflow: hidden; }
+      canvas#grid-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: #0d0d14;
+      }
+      #sidebar {
+        display: none;
+        border-left: 1px solid #2a2a3a;
+        overflow-y: auto;
+        padding: 12px;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #sidebar h2 { font-size: 0.75rem; color: #666; letter-spacing: 1px; margin-bottom: 4px; }
+      #action-panel { display: flex; flex-direction: column; gap: 6px; }
+      .action-btn {
+        background: #111;
+        border: 1px solid #333;
+        color: #aaa;
+        padding: 8px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.8rem;
+        text-align: left;
+        transition: border-color 0.15s;
+      }
+      .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      #chronicle-list {
+        font-size: 0.72rem;
+        line-height: 1.6;
+        color: #666;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .chronicle-entry { border-left: 2px solid #2a2a3a; padding-left: 8px; }
+      .chronicle-entry.branch-1 { border-color: #6644aa; }
+      .chronicle-entry.branch-2 { border-color: #aa4466; }
+      .chronicle-entry.branch-3 { border-color: #44aa88; }
+      footer {
+        grid-column: 1 / -1;
+        padding: 6px 20px;
+        border-top: 1px solid #1a1a2a;
+        font-size: 0.7rem;
+        color: #333;
+        display: flex;
+        gap: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>CHRONICLE WORLDS</h1>
+      <span id="status">not connected</span>
+      <span id="cooldown-display"></span>
+    </header>
+
+    <!-- Auth Panel (shown when logged out) -->
+    <div id="auth-panel">
+      <h2 style="color:#8888cc;letter-spacing:2px">ENTER THE WORLD</h2>
+      <input type="email" id="auth-email" placeholder="email" />
+      <input type="password" id="auth-password" placeholder="password" />
+      <button id="auth-sign-in">Sign In</button>
+      <button id="auth-sign-up" style="background:#111;border-color:#333;color:#666">Create Account</button>
+      <span id="auth-error"></span>
+    </div>
+
+    <!-- Game Area (shown when logged in) -->
+    <div id="game-area">
+      <canvas id="grid-canvas"></canvas>
+    </div>
+    <div id="sidebar">
+      <div>
+        <h2>ACTIONS</h2>
+        <div id="action-panel">
+          <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
+          <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
+          <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
+          <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
+          <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
+        </div>
+      </div>
+      <div>
+        <h2>CHRONICLE</h2>
+        <div id="chronicle-list"><span style="color:#333">loading...</span></div>
+      </div>
+    </div>
+
+    <footer>
+      <span id="player-info">—</span>
+      <span id="turn-info">—</span>
+      <span id="branch-info">branch: root</span>
+    </footer>
+
+    <script type="module" src="/src/supabase-client.js"></script>
+    <script type="module" src="/src/turn-manager.js"></script>
+    <script type="module" src="/src/grid-renderer.js"></script>
+    <script type="module" src="/src/chronicle-reader.js"></script>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
