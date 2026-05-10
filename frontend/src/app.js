@@ -4,20 +4,20 @@ import { initGridRenderer, loadEntityPositions, updateGrid } from './grid-render
 import { loadChronicle, appendChronicleEntry } from './chronicle-reader.js'
 
 // DOM refs
-const authPanel = document.getElementById('auth-panel')
-const gameArea = document.getElementById('game-area')
-const sidebar = document.getElementById('sidebar')
-const statusEl = document.getElementById('status')
-const cooldownEl = document.getElementById('cooldown-display')
-const playerInfoEl = document.getElementById('player-info')
-const turnInfoEl = document.getElementById('turn-info')
-const branchInfoEl = document.getElementById('branch-info')
+const authPanel       = document.getElementById('auth-panel')
+const gameArea        = document.getElementById('game-area')
+const sidebar         = document.getElementById('sidebar')
+const statusEl        = document.getElementById('status')
+const cooldownEl      = document.getElementById('cooldown-display')
+const playerInfoEl    = document.getElementById('player-info')
+const turnInfoEl      = document.getElementById('turn-info')
+const branchInfoEl    = document.getElementById('branch-info')
 const chronicleListEl = document.getElementById('chronicle-list')
-const canvas = document.getElementById('grid-canvas')
+const canvas          = document.getElementById('grid-canvas')
 
 // Auth UI
 document.getElementById('auth-sign-in').addEventListener('click', async () => {
-  const email = document.getElementById('auth-email').value
+  const email    = document.getElementById('auth-email').value
   const password = document.getElementById('auth-password').value
   try {
     await signIn(email, password)
@@ -27,7 +27,7 @@ document.getElementById('auth-sign-in').addEventListener('click', async () => {
 })
 
 document.getElementById('auth-sign-up').addEventListener('click', async () => {
-  const email = document.getElementById('auth-email').value
+  const email    = document.getElementById('auth-email').value
   const password = document.getElementById('auth-password').value
   try {
     await signUp(email, password)
@@ -48,9 +48,9 @@ onAuthChange(async (event, session) => {
 
 async function showGame(user) {
   authPanel.style.display = 'none'
-  gameArea.style.display = 'block'
-  sidebar.style.display = 'flex'
-  statusEl.textContent = `connected as ${user.email}`
+  gameArea.style.display  = 'block'
+  sidebar.style.display   = 'flex'
+  statusEl.textContent    = `connected as ${user.email}`
   playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
 
   // Init subsystems
@@ -72,7 +72,7 @@ async function showGame(user) {
     },
   })
 
-  // Realtime: subscribe to turn_resolved broadcasts
+  // Realtime: player turn broadcasts
   supabase.channel('turns')
     .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
       updateGrid(payload)
@@ -81,6 +81,21 @@ async function showGame(user) {
       const branchId = payload.branch_id ?? 0
       branchInfoEl.textContent = `branch: ${branchId === 0 ? 'root' : branchId}`
     })
+    .subscribe()
+
+  // Realtime: world tick — subscribe to world_tick_state row updates
+  // Fires every minute when pg_cron calls world_tick()
+  supabase.channel('world-tick')
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
+      (payload) => {
+        const du = payload.new?.duration_unit
+        statusEl.textContent = `connected as ${user.email} · du: ${du}`
+        // Reload grid — new chars may have spawned, materials changed, etc.
+        updateGrid(payload)
+      }
+    )
     .subscribe()
 
   // Action buttons
@@ -100,10 +115,10 @@ async function showGame(user) {
 }
 
 function showAuth() {
-  authPanel.style.display = 'flex'
-  gameArea.style.display = 'none'
-  sidebar.style.display = 'none'
-  statusEl.textContent = 'not connected'
+  authPanel.style.display  = 'flex'
+  gameArea.style.display   = 'none'
+  sidebar.style.display    = 'none'
+  statusEl.textContent     = 'not connected'
 }
 
 function setActionsDisabled(disabled) {
