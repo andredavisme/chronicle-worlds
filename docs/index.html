@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chronicle Worlds</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0a0a0f;
+        color: #c8c8d4;
+        font-family: 'Courier New', monospace;
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        grid-template-rows: auto 1fr auto;
+        height: 100vh;
+        overflow: hidden;
+      }
+      header {
+        grid-column: 1 / -1;
+        padding: 12px 20px;
+        border-bottom: 1px solid #2a2a3a;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      header h1 { font-size: 1rem; color: #8888cc; letter-spacing: 2px; }
+      #status { font-size: 0.75rem; color: #555; margin-left: auto; }
+      #cooldown-display { font-size: 0.75rem; color: #44aa66; min-width: 80px; text-align: right; }
+      #auth-panel {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 40px;
+      }
+      #auth-panel input {
+        background: #111;
+        border: 1px solid #333;
+        color: #c8c8d4;
+        padding: 8px 12px;
+        font-family: inherit;
+        width: 260px;
+      }
+      #auth-panel button {
+        background: #2a2a6a;
+        border: 1px solid #4444aa;
+        color: #aaaaee;
+        padding: 8px 24px;
+        cursor: pointer;
+        font-family: inherit;
+        letter-spacing: 1px;
+      }
+      #auth-panel button:hover { background: #3a3a8a; }
+      #auth-error { color: #cc4444; font-size: 0.8rem; min-height: 1.2em; }
+      #auth-sign-out {
+        display: none;
+        background: #111;
+        border: 1px solid #333;
+        color: #666;
+        padding: 4px 12px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.75rem;
+      }
+      #game-area { display: none; grid-column: 1; overflow: hidden; }
+      canvas#grid-canvas { display: block; width: 100%; height: 100%; background: #0d0d14; }
+      #sidebar {
+        display: none;
+        border-left: 1px solid #2a2a3a;
+        overflow-y: auto;
+        padding: 12px;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #sidebar h2 { font-size: 0.75rem; color: #666; letter-spacing: 1px; margin-bottom: 4px; }
+      #action-panel { display: flex; flex-direction: column; gap: 6px; }
+      .action-btn {
+        background: #111;
+        border: 1px solid #333;
+        color: #aaa;
+        padding: 8px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.8rem;
+        text-align: left;
+        transition: border-color 0.15s;
+      }
+      .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      #chronicle-list {
+        font-size: 0.72rem;
+        line-height: 1.6;
+        color: #666;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .chronicle-entry { border-left: 2px solid #2a2a3a; padding-left: 8px; }
+      .chronicle-entry.branch-1 { border-color: #6644aa; }
+      .chronicle-entry.branch-2 { border-color: #aa4466; }
+      .chronicle-entry.branch-3 { border-color: #44aa88; }
+      footer {
+        grid-column: 1 / -1;
+        padding: 6px 20px;
+        border-top: 1px solid #1a1a2a;
+        font-size: 0.7rem;
+        color: #333;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>CHRONICLE WORLDS</h1>
+      <span id="status">not connected</span>
+      <span id="cooldown-display"></span>
+      <button id="auth-sign-out">sign out</button>
+    </header>
+
+    <!-- Auth Panel -->
+    <div id="auth-panel">
+      <h2 style="color:#8888cc;letter-spacing:2px">ENTER THE WORLD</h2>
+      <input type="email" id="auth-email" placeholder="email" autocomplete="email" />
+      <input type="password" id="auth-password" placeholder="password" autocomplete="current-password" />
+      <button id="auth-sign-in">Sign In</button>
+      <button id="auth-sign-up" style="background:#111;border-color:#333;color:#666">Create Account</button>
+      <span id="auth-error"></span>
+    </div>
+
+    <!-- Game Area -->
+    <div id="game-area">
+      <canvas id="grid-canvas"></canvas>
+    </div>
+    <div id="sidebar">
+      <div>
+        <h2>ACTIONS</h2>
+        <div id="action-panel">
+          <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
+          <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
+          <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
+          <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
+          <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
+        </div>
+      </div>
+      <div>
+        <h2>CHRONICLE</h2>
+        <div id="chronicle-list"><span style="color:#333">loading...</span></div>
+      </div>
+    </div>
+
+    <footer>
+      <span id="player-info">—</span>
+      <span id="turn-info">—</span>
+      <span id="branch-info">branch: root</span>
+    </footer>
+
+    <!-- Supabase JS via CDN (no build step needed) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+    <script>
+      // ─── Supabase client ──────────────────────────────────────────
+      const SUPABASE_URL = 'https://hhyhulqngdkwsxhymmcd.supabase.co'
+      const SUPABASE_KEY = 'sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI'
+      const supabase = supabase_js.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+      // ─── DOM refs ─────────────────────────────────────────────────
+      const authPanel      = document.getElementById('auth-panel')
+      const gameArea       = document.getElementById('game-area')
+      const sidebar        = document.getElementById('sidebar')
+      const statusEl       = document.getElementById('status')
+      const cooldownEl     = document.getElementById('cooldown-display')
+      const playerInfoEl   = document.getElementById('player-info')
+      const turnInfoEl     = document.getElementById('turn-info')
+      const branchInfoEl   = document.getElementById('branch-info')
+      const chronicleListEl = document.getElementById('chronicle-list')
+      const canvas         = document.getElementById('grid-canvas')
+      const signOutBtn     = document.getElementById('auth-sign-out')
+
+      // ─── Grid renderer ────────────────────────────────────────────
+      let ctx
+      let entities = []
+      const TILE_W = 48, TILE_H = 24
+
+      function isoProject(x, y, z) {
+        return {
+          sx: (x - y) * (TILE_W / 2),
+          sy: (x + y) * (TILE_H / 2) - z * TILE_H,
+        }
+      }
+
+      function initGridRenderer() {
+        ctx = canvas.getContext('2d')
+        resizeCanvas()
+        window.addEventListener('resize', resizeCanvas)
+        renderGrid()
+      }
+
+      function resizeCanvas() {
+        canvas.width  = canvas.parentElement.clientWidth
+        canvas.height = canvas.parentElement.clientHeight
+        renderGrid()
+      }
+
+      async function loadEntityPositions() {
+        const { data, error } = await supabase
+          .from('entity_positions')
+          .select('entity_type, entity_id, effective_size, grid_cells(x, y, z)')
+          .is('timestamp_end', null)
+        if (error) { console.error('entity_positions:', error); return }
+        entities = (data || []).map(row => ({
+          entity_type: row.entity_type,
+          entity_id:   row.entity_id,
+          effective_size: row.effective_size,
+          x: row.grid_cells?.x ?? 0,
+          y: row.grid_cells?.y ?? 0,
+          z: row.grid_cells?.z ?? 0,
+        }))
+        renderGrid()
+      }
+
+      function renderGrid() {
+        if (!ctx) return
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const cx = canvas.width / 2
+        const cy = canvas.height / 2
+
+        for (const e of entities) {
+          const { sx, sy } = isoProject(e.x, e.y, e.z)
+          const r = Math.max(4, (e.effective_size || 1) * 6)
+          ctx.beginPath()
+          ctx.ellipse(cx + sx, cy + sy, r, r * 0.55, 0, 0, Math.PI * 2)
+          ctx.fillStyle = e.entity_type === 'character' ? '#6688ff'
+                        : e.entity_type === 'setting'   ? '#224422'
+                        : '#444466'
+          ctx.fill()
+          ctx.fillStyle = '#88aaff'
+          ctx.font = '9px Courier New'
+          ctx.fillText(`${e.entity_type[0].toUpperCase()}${e.entity_id}`, cx + sx + r + 2, cy + sy + 3)
+        }
+
+        if (entities.length === 0) {
+          ctx.fillStyle = '#2a2a3a'
+          ctx.font = '12px Courier New'
+          ctx.textAlign = 'center'
+          ctx.fillText('no entities in world', canvas.width / 2, canvas.height / 2)
+          ctx.textAlign = 'left'
+        }
+      }
+
+      // ─── Chronicle ────────────────────────────────────────────────
+      async function loadChronicle() {
+        const { data, error } = await supabase
+          .from('chronicle')
+          .select('chronicle_id, timestamp, turn_number, branch_id, event_id, events(event_type, duration_units)')
+          .order('timestamp', { ascending: false })
+          .order('sequence_index', { ascending: false })
+          .limit(40)
+        if (error) { console.error('chronicle:', error); return }
+        renderChronicle(data || [])
+      }
+
+      function renderChronicle(entries) {
+        if (entries.length === 0) {
+          chronicleListEl.innerHTML = '<span style="color:#333">no chronicle entries yet</span>'
+          return
+        }
+        chronicleListEl.innerHTML = entries.map(entry => {
+          const branchClass = entry.branch_id > 0 ? `branch-${Math.min(entry.branch_id, 3)}` : ''
+          const eventType = entry.events?.event_type ?? 'unknown'
+          const duration  = entry.events?.duration_units ?? '?'
+          const branchLabel = entry.branch_id > 0 ? ` [branch ${entry.branch_id}]` : ''
+          const t = entry.timestamp?.toFixed ? entry.timestamp.toFixed(2) : entry.timestamp
+          return `<div class="chronicle-entry ${branchClass}">
+            <span style="color:#555">t=${t}</span>
+            <span style="color:#8888cc">turn ${entry.turn_number}</span>
+            <span>${eventType}</span>
+            <span style="color:#444">${duration}u${branchLabel}</span>
+          </div>`
+        }).join('')
+      }
+
+      function prependChronicleEntry(payload) {
+        const div = document.createElement('div')
+        div.className = 'chronicle-entry'
+        div.innerHTML = `<span style="color:#44aa66">live</span> <span style="color:#8888cc">turn ${payload.turn_number ?? '?'}</span> <span>${payload.event_type ?? payload.action ?? ''}</span>`
+        chronicleListEl.prepend(div)
+      }
+
+      // ─── Turn manager ─────────────────────────────────────────────
+      const COOLDOWN_MS = 60_000
+      const DEFAULT_SETTING_ID = 1
+      let cooldownEnd = 0
+      let cooldownTimer = null
+
+      function startCooldown() {
+        cooldownEnd = Date.now() + COOLDOWN_MS
+        clearInterval(cooldownTimer)
+        cooldownTimer = setInterval(() => {
+          const rem = Math.ceil((cooldownEnd - Date.now()) / 1000)
+          if (rem <= 0) {
+            clearInterval(cooldownTimer)
+            cooldownEl.textContent = ''
+          } else {
+            cooldownEl.textContent = `cooldown: ${rem}s`
+          }
+        }, 1000)
+      }
+
+      async function submitAction(action, details = {}) {
+        const now = Date.now()
+        if (now < cooldownEnd) {
+          cooldownEl.textContent = `cooldown: ${Math.ceil((cooldownEnd - now) / 1000)}s`
+          return
+        }
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) { statusEl.textContent = 'not authenticated'; return }
+
+        const { data, error } = await supabase.functions.invoke('resolve-turn', {
+          body: {
+            action,
+            player_id: session.user.id,
+            details: {
+              setting_id: DEFAULT_SETTING_ID,
+              submit_timestamp: now / 1000,
+              sequence_index: Math.floor(Math.random() * 1_000_000),
+              ...details,
+            },
+          },
+        })
+
+        if (error) throw error
+
+        if (data.status === 'resolved') {
+          startCooldown()
+          turnInfoEl.textContent = `last turn: ${data.event?.turn_number ?? '?'}`
+          prependChronicleEntry(data.event ?? {})
+        } else if (data.status === 'queued') {
+          statusEl.textContent = 'turn queued — waiting…'
+        }
+        return data
+      }
+
+      // ─── Auth ─────────────────────────────────────────────────────
+      document.getElementById('auth-sign-in').addEventListener('click', async () => {
+        const email    = document.getElementById('auth-email').value.trim()
+        const password = document.getElementById('auth-password').value
+        document.getElementById('auth-error').textContent = ''
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) document.getElementById('auth-error').textContent = error.message
+      })
+
+      document.getElementById('auth-sign-up').addEventListener('click', async () => {
+        const email    = document.getElementById('auth-email').value.trim()
+        const password = document.getElementById('auth-password').value
+        document.getElementById('auth-error').textContent = ''
+        const { error } = await supabase.auth.signUp({ email, password })
+        if (error) document.getElementById('auth-error').textContent = error.message
+        else document.getElementById('auth-error').textContent = 'Check your email to confirm account.'
+      })
+
+      signOutBtn.addEventListener('click', () => supabase.auth.signOut())
+
+      // Enter key on password field triggers sign-in
+      document.getElementById('auth-password').addEventListener('keydown', e => {
+        if (e.key === 'Enter') document.getElementById('auth-sign-in').click()
+      })
+
+      // ─── Auth state machine ───────────────────────────────────────
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          showGame(session.user)
+        } else {
+          showAuth()
+        }
+      })
+
+      async function showGame(user) {
+        authPanel.style.display  = 'none'
+        gameArea.style.display   = 'block'
+        sidebar.style.display    = 'flex'
+        signOutBtn.style.display = 'inline-block'
+        statusEl.textContent = `connected as ${user.email}`
+        playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
+
+        initGridRenderer()
+        await loadEntityPositions()
+        await loadChronicle()
+
+        // Action buttons
+        document.querySelectorAll('.action-btn').forEach(btn => {
+          // Remove any previous listeners by cloning
+          const fresh = btn.cloneNode(true)
+          btn.parentNode.replaceChild(fresh, btn)
+          fresh.addEventListener('click', async () => {
+            setActionsDisabled(true)
+            statusEl.textContent = `submitting ${fresh.dataset.action}…`
+            try {
+              await submitAction(fresh.dataset.action)
+              statusEl.textContent = `connected as ${user.email}`
+            } catch (e) {
+              statusEl.textContent = `error: ${e.message}`
+            } finally {
+              setActionsDisabled(false)
+            }
+          })
+        })
+
+        // Realtime
+        supabase.channel('turns')
+          .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
+            loadEntityPositions()
+            loadChronicle()
+            startCooldown()
+            const branchId = payload.branch_id ?? 0
+            branchInfoEl.textContent = `branch: ${branchId === 0 ? 'root' : branchId}`
+          })
+          .subscribe()
+      }
+
+      function showAuth() {
+        authPanel.style.display  = 'flex'
+        gameArea.style.display   = 'none'
+        sidebar.style.display    = 'none'
+        signOutBtn.style.display = 'none'
+        statusEl.textContent     = 'not connected'
+        playerInfoEl.textContent = '—'
+        turnInfoEl.textContent   = '—'
+        branchInfoEl.textContent = 'branch: root'
+      }
+
+      function setActionsDisabled(disabled) {
+        document.querySelectorAll('.action-btn').forEach(b => b.disabled = disabled)
+      }
+    </script>
+  </body>
+</html>
