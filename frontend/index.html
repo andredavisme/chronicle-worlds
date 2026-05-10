@@ -6,6 +6,7 @@
     <title>Chronicle Worlds</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
+
       body {
         background: #0a0a0f;
         color: #c8c8d4;
@@ -13,9 +14,10 @@
         display: grid;
         grid-template-columns: 1fr 320px;
         grid-template-rows: auto 1fr auto;
-        height: 100vh;
+        height: 100dvh;
         overflow: hidden;
       }
+
       header {
         grid-column: 1 / -1;
         padding: 12px 20px;
@@ -23,6 +25,7 @@
         display: flex;
         align-items: center;
         gap: 16px;
+        flex-wrap: wrap;
       }
       header h1 { font-size: 1rem; color: #8888cc; letter-spacing: 2px; }
       #status { font-size: 0.75rem; color: #555; margin-left: auto; }
@@ -32,6 +35,21 @@
         min-width: 80px;
         text-align: right;
       }
+
+      /* Mobile panel toggle button — hidden on desktop */
+      #mobile-panel-toggle {
+        display: none;
+        background: #1a1a3a;
+        border: 1px solid #3a3a6a;
+        color: #8888cc;
+        padding: 5px 12px;
+        font-family: inherit;
+        font-size: 0.75rem;
+        cursor: pointer;
+        letter-spacing: 1px;
+        margin-left: auto;
+      }
+
       #auth-panel {
         grid-column: 1 / -1;
         display: flex;
@@ -39,7 +57,7 @@
         align-items: center;
         justify-content: center;
         gap: 12px;
-        padding: 40px;
+        padding: 40px 20px;
       }
       #auth-panel input {
         background: #111;
@@ -48,6 +66,7 @@
         padding: 8px 12px;
         font-family: inherit;
         width: 260px;
+        max-width: 100%;
       }
       #auth-panel button {
         background: #2a2a6a;
@@ -57,9 +76,12 @@
         cursor: pointer;
         font-family: inherit;
         letter-spacing: 1px;
+        width: 260px;
+        max-width: 100%;
       }
       #auth-panel button:hover { background: #3a3a8a; }
       #auth-error { color: #cc4444; font-size: 0.8rem; }
+
       #game-area { display: none; grid-column: 1; overflow: hidden; }
       canvas#grid-canvas {
         display: block;
@@ -67,6 +89,7 @@
         height: 100%;
         background: #0d0d14;
       }
+
       #sidebar {
         display: none;
         border-left: 1px solid #2a2a3a;
@@ -76,6 +99,7 @@
         gap: 12px;
       }
       #sidebar h2 { font-size: 0.75rem; color: #666; letter-spacing: 1px; margin-bottom: 4px; }
+
       #action-panel { display: flex; flex-direction: column; gap: 6px; }
       .action-btn {
         background: #111;
@@ -90,6 +114,7 @@
       }
       .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
       .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
       #chronicle-list {
         font-size: 0.72rem;
         line-height: 1.6;
@@ -102,6 +127,7 @@
       .chronicle-entry.branch-1 { border-color: #6644aa; }
       .chronicle-entry.branch-2 { border-color: #aa4466; }
       .chronicle-entry.branch-3 { border-color: #44aa88; }
+
       footer {
         grid-column: 1 / -1;
         padding: 6px 20px;
@@ -110,6 +136,70 @@
         color: #333;
         display: flex;
         gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      /* ─── Mobile ≤ 767px ─────────────────────────────────────── */
+      @media (max-width: 767px) {
+        body {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 1fr auto;
+        }
+
+        #mobile-panel-toggle { display: inline-block; margin-left: auto; }
+        #cooldown-display { margin-left: 0; }
+        #status { margin-left: 0; }
+
+        /* Game area fills full width */
+        #game-area { grid-column: 1; }
+
+        /* Sidebar becomes a bottom-slide drawer */
+        #sidebar {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          height: 55vh;
+          border-left: none;
+          border-top: 1px solid #3a3a6a;
+          background: rgba(10, 10, 20, 0.97);
+          z-index: 100;
+          transform: translateY(100%);
+          transition: transform 0.25s ease;
+          overflow-y: auto;
+          padding: 16px;
+        }
+        #sidebar.open {
+          transform: translateY(0);
+        }
+        /* Drag handle hint at top of drawer */
+        #sidebar::before {
+          content: '';
+          display: block;
+          width: 40px;
+          height: 3px;
+          background: #3a3a6a;
+          border-radius: 2px;
+          margin: 0 auto 12px;
+        }
+
+        /* Actions flow in a 2-column grid on mobile for easy tapping */
+        #action-panel {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .action-btn {
+          padding: 12px 8px;
+          font-size: 0.75rem;
+          text-align: center;
+        }
+
+        footer {
+          padding: 6px 12px;
+          gap: 10px;
+          font-size: 0.65rem;
+        }
       }
     </style>
   </head>
@@ -118,13 +208,14 @@
       <h1>CHRONICLE WORLDS</h1>
       <span id="status">not connected</span>
       <span id="cooldown-display"></span>
+      <button id="mobile-panel-toggle">ACTIONS &#9650;</button>
     </header>
 
     <!-- Auth Panel (shown when logged out) -->
     <div id="auth-panel">
       <h2 style="color:#8888cc;letter-spacing:2px">ENTER THE WORLD</h2>
-      <input type="email" id="auth-email" placeholder="email" />
-      <input type="password" id="auth-password" placeholder="password" />
+      <input type="email" id="auth-email" placeholder="email" autocomplete="email" />
+      <input type="password" id="auth-password" placeholder="password" autocomplete="current-password" />
       <button id="auth-sign-in">Sign In</button>
       <button id="auth-sign-up" style="background:#111;border-color:#333;color:#666">Create Account</button>
       <span id="auth-error"></span>
@@ -162,5 +253,15 @@
     <script type="module" src="/src/grid-renderer.js"></script>
     <script type="module" src="/src/chronicle-reader.js"></script>
     <script type="module" src="/src/app.js"></script>
+
+    <!-- Mobile drawer toggle -->
+    <script>
+      const toggle = document.getElementById('mobile-panel-toggle')
+      const sidebar = document.getElementById('sidebar')
+      toggle.addEventListener('click', () => {
+        const isOpen = sidebar.classList.toggle('open')
+        toggle.innerHTML = isOpen ? 'ACTIONS &#9660;' : 'ACTIONS &#9650;'
+      })
+    </script>
   </body>
 </html>
