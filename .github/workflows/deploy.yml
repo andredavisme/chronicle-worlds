@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # cache omitted: package-lock.json not committed; npm install is fast enough
 
       - name: Install dependencies
         working-directory: frontend
@@ -30,12 +29,12 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
-        # Output goes to /docs (vite.config.js outDir: '../docs')
+        # Output: /docs (vite.config.js outDir: '../docs')
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
-          publish_branch: main
-          keep_files: true
+          publish_branch: gh-pages
+          # keep_files omitted: gh-pages branch is build-only, full replace each deploy
