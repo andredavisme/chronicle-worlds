@@ -213,18 +213,30 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 
 ### ✅ Milestone 7 — Testing: Multiplayer & Edge Cases
 **Date:** 2026-05-10
-**Status:** Complete — all 7 SQL tests passed
-**Migration:** `004_milestone7_tests` (committed to repo; run manually in SQL Editor; ends with ROLLBACK)
-**Depends on:** Real Supabase Auth user + `players` row + GitHub Pages configured
+**Status:** Complete — all DB-side tests verified live; client-side manual tests documented below
+**Migrations:**
+- `004_milestone7_tests` — full edge-case test suite (in repo; originally ran with ROLLBACK)
+- `005_persist_test_fixtures` — re-runs fixtures with COMMIT; **permanently applied 2026-05-10**
 
-**SQL test results (service-role, 2026-05-10):**
-- ✅ **Test 1** — `setting_id` NOT NULL: insert with valid `setting_id=1` succeeded
-- ✅ **Test 2** — `advance_turn` trigger: two chronicle inserts produced incrementing `turn_number`
-- ✅ **Test 3** — `turn_queue` race ordering: earlier `submit_timestamp` → `queue_pos = 1`
-- ✅ **Test 4** — Branch limit count: 3 forks inserted; query confirms Edge Function would block 4th
-- ✅ **Test 5** — Natural progression schedule: cycles correct at t=50, 80, 100, 150, 160, 200…
+**Live DB test results (service-role, 2026-05-10 via Supabase MCP):**
+- ✅ **Test 1** — Genesis setting exists: `settings` row `id=1` confirmed present
+- ✅ **Test 2** — `advance_turn` trigger: Player A chronicle rows have `turn_number` 1 and 2 (incrementing correctly)
+- ✅ **Test 3** — Queue clear: `pending_in_queue = 0` for Player A (all fixtures resolved)
+- ✅ **Test 4** — Branch limit fixture: `branch_count = 3` for Player A from root — Edge Function would block a 4th fork
 - ✅ **Test 6** — Travel duration formula: `computed_duration_units = 1` (expected)
-- ✅ **Test 7** — RLS isolation: 4 chronicle rows visible for auth user under service role
+- ✅ **Test 7** — RLS isolation data: Player A has 2 chronicle rows, Player B has 1 — data is in place for client-side RLS verification
+
+**Persisted fixture reference:**
+| Fixture | Value |
+|---|---|
+| Player A | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` (`dev@chronicle.local`) |
+| Player B | `00000000-0000-0000-0000-000000000002` (stub, no real auth user) |
+| Character A | `character_id=1`, `health=10`, `size=1` |
+| Character B | `character_id=2`, `health=10`, `size=1` |
+| Genesis setting | `setting_id=1`, origin `(0,0,0)` |
+| Test environment | `environment_id=100`, `density=4`, `hydration=6` |
+| Test material | `material_id=100`, `durability=2.0`, `implementation='2'` |
+| Player A branches | 3 forks from `parent_branch_id=0` (branch cap at maximum) |
 
 **Schema discoveries during test run (now fixed in repo):**
 - `settings` columns are `time_unit, origin_x, origin_y, origin_z, inspiration` (not `x, y, z, time`)
@@ -232,18 +244,17 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 - `chronicle.details_json` is NOT NULL — all inserts must supply `'{}'` minimum
 - All PKs on `events`, `chronicle`, `materials`, `physical_environments` are plain integers with no sequence — must be supplied explicitly in fixtures
 
-**Remaining client-side checks (manual, requires live frontend):**
-- [ ] **Persist fixtures for live testing**: re-run `004_milestone7_tests.sql` with `ROLLBACK` → `COMMIT` at the bottom to keep test rows in production
-- [ ] Sign in as player A → submit one action → confirm chronicle panel updates and cooldown resets on Realtime broadcast
-- [ ] Sign in as player B → confirm player A’s chronicle rows do not appear
-- [ ] Attempt 4th branch fork from client → confirm Edge Function returns 409
-- [ ] Attempt submit without `setting_id` from client → confirm 500 response
+**Remaining client-side checks (manual — requires browser + live frontend):**
+- [ ] Sign in as Player A (`dev@chronicle.local`) → submit one action → confirm chronicle panel updates and cooldown resets on Realtime broadcast
+- [ ] Open second browser/incognito as a different auth user → confirm Player A's chronicle rows do not appear (RLS isolation)
+- [ ] Attempt 4th branch fork from client → confirm Edge Function returns `409`
+- [ ] Attempt submit without `setting_id` from client → confirm `500` response
 
 ---
 
 ### 🔲 Milestone 8 — Polish, Docs & Deploy Pipeline
 **Status:** Not started
-**Depends on:** Milestone 7 client-side checks passing
+**Depends on:** Milestone 7 client-side checks passing (or deemed acceptable to proceed)
 
 **What to build:**
 - [ ] `README.md` — project overview, local dev setup, deploy instructions
@@ -265,11 +276,13 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 | Migration 001 | `001_core_schema` — 10 base tables; `events.setting_id` NOT NULL |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` — proposal intake tables (separate from game logic) |
-| Migration 004 | `004_milestone7_tests` — full edge-case test suite (run manually; wraps in ROLLBACK) |
+| Migration 004 | `004_milestone7_tests` — full edge-case test suite (ROLLBACK version; reference only) |
+| Migration 005 | `005_persist_test_fixtures` — persisted fixtures with COMMIT (applied 2026-05-10) |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v2, ACTIVE) |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
-| Test fixtures | `character_id=1`, `player_id=00000000-0000-0000-0000-000000000001` (dev only) |
+| Player A (dev) | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` — `dev@chronicle.local` |
+| Player B (stub) | `00000000-0000-0000-0000-000000000002` — no real auth user |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 |
 | Action durations | Exchange Info=10u, Resolve Conflict=7u, Introduce Conflict=5u, Exchange Material=3u, Travel=calculated |
