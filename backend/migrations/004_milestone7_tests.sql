@@ -28,8 +28,6 @@ SELECT
 
 -- ─────────────────────────────────────────────
 -- 1. FIXTURES
--- IDs start at 100 to avoid collision with existing rows.
--- All PKs are plain integers with no sequence — must be explicit.
 -- ─────────────────────────────────────────────
 INSERT INTO settings (setting_id, time_unit, origin_x, origin_y, origin_z, inspiration)
 VALUES (1, 0, 0, 0, 0, NULL)
@@ -81,39 +79,24 @@ SELECT 'TEST 1 PASS — setting_id insert succeeded' AS result;
 INSERT INTO events (
   event_id, event_type, duration_units, start_timestamp,
   resolution_state, setting_id, submit_timestamp
-) VALUES (
-  101, 'exchange_information', 10,
-  EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
-  EXTRACT(EPOCH FROM NOW())
-);
+) VALUES
+  (101, 'exchange_information', 10, EXTRACT(EPOCH FROM NOW()), 'resolved', 1, EXTRACT(EPOCH FROM NOW())),
+  (102, 'exchange_material',    3,  EXTRACT(EPOCH FROM NOW()), 'resolved', 1, EXTRACT(EPOCH FROM NOW()));
 
 INSERT INTO chronicle (
   chronicle_id, event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
+  timestamp, sequence_index, submit_timestamp, resolution_order, details_json
 )
-SELECT
-  100, 101, 1, i.player_a, 0,
-  EXTRACT(EPOCH FROM NOW()), 1,
-  EXTRACT(EPOCH FROM NOW()), 1
+SELECT 100, 101, 1, i.player_a, 0,
+  EXTRACT(EPOCH FROM NOW()), 1, EXTRACT(EPOCH FROM NOW()), 1, '{}'
 FROM _test_inputs i;
 
-INSERT INTO events (
-  event_id, event_type, duration_units, start_timestamp,
-  resolution_state, setting_id, submit_timestamp
-) VALUES (
-  102, 'exchange_material', 3,
-  EXTRACT(EPOCH FROM NOW()), 'resolved', 1,
-  EXTRACT(EPOCH FROM NOW())
-);
-
 INSERT INTO chronicle (
   chronicle_id, event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
+  timestamp, sequence_index, submit_timestamp, resolution_order, details_json
 )
-SELECT
-  101, 102, 1, i.player_a, 0,
-  EXTRACT(EPOCH FROM NOW()), 2,
-  EXTRACT(EPOCH FROM NOW()), 2
+SELECT 101, 102, 1, i.player_a, 0,
+  EXTRACT(EPOCH FROM NOW()), 2, EXTRACT(EPOCH FROM NOW()), 2, '{}'
 FROM _test_inputs i;
 
 SELECT
@@ -139,16 +122,18 @@ INSERT INTO events (
 
 INSERT INTO chronicle (
   chronicle_id, event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
+  timestamp, sequence_index, submit_timestamp, resolution_order, details_json
 )
-SELECT 102, 103, 1, i.player_a, 0, EXTRACT(EPOCH FROM NOW()), 10, 1000.001, 1
+SELECT 102, 103, 1, i.player_a, 0,
+  EXTRACT(EPOCH FROM NOW()), 10, 1000.001, 1, '{}'
 FROM _test_inputs i;
 
 INSERT INTO chronicle (
   chronicle_id, event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
+  timestamp, sequence_index, submit_timestamp, resolution_order, details_json
 )
-SELECT 103, 104, 1, i.player_a, 0, EXTRACT(EPOCH FROM NOW()), 11, 1000.002, 2
+SELECT 103, 104, 1, i.player_a, 0,
+  EXTRACT(EPOCH FROM NOW()), 11, 1000.002, 2, '{}'
 FROM _test_inputs i;
 
 SELECT
@@ -168,11 +153,8 @@ LIMIT 5;
 -- ─────────────────────────────────────────────
 INSERT INTO branches (fork_timestamp, player_id, parent_branch_id)
 SELECT
-  EXTRACT(EPOCH FROM NOW()) + s.n,
-  i.player_a,
-  0
-FROM _test_inputs i,
-     (VALUES (1),(2),(3)) AS s(n);
+  EXTRACT(EPOCH FROM NOW()) + s.n, i.player_a, 0
+FROM _test_inputs i, (VALUES (1),(2),(3)) AS s(n);
 
 SELECT
   'TEST 4' AS test,
@@ -245,12 +227,11 @@ WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid;
 
 INSERT INTO chronicle (
   chronicle_id, event_id, character_id, player_id, branch_id,
-  timestamp, sequence_index, submit_timestamp, resolution_order
+  timestamp, sequence_index, submit_timestamp, resolution_order, details_json
 )
 SELECT
   104, 105, 2, i.player_b, 0,
-  EXTRACT(EPOCH FROM NOW()), 20,
-  EXTRACT(EPOCH FROM NOW()), 1
+  EXTRACT(EPOCH FROM NOW()), 20, EXTRACT(EPOCH FROM NOW()), 1, '{}'
 FROM _test_inputs i
 WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid;
 
