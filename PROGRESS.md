@@ -193,15 +193,6 @@ Full Vite + JS frontend scaffolded in `/frontend/` and GitHub Actions deploy wor
 **One manual step required:**
 Go to **GitHub repo → Settings → Pages → Source: Deploy from branch `main`, folder `/docs`**. The workflow handles all subsequent deploys automatically.
 
-**What to do next:**
-- Milestone 5 & 6 are already implemented inside `app.js` and `chronicle-reader.js` — Realtime subscription and chronicle panel are live in the scaffold
-- The remaining blocker is a **real Supabase Auth user** — create one via the Supabase dashboard or sign-up flow, then link a `players` row (`player_id = auth.uid()`, `controlled_character_id = 1`) to unblock the first live turn
-- After first live turn: proceed to Milestone 7 (multiplayer + edge case testing)
-
----
-
-## Up Next
-
 ---
 
 ### ✅ Milestone 5 — Realtime: Turn Subscription
@@ -221,31 +212,44 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 ---
 
 ### 🔲 Milestone 7 — Testing: Multiplayer & Edge Cases
-**Status:** Not started
-**Depends on:** Real Supabase Auth user + `players` row linked to a character
+**Date:** 2026-05-10
+**Status:** In progress
+**Migration:** `004_milestone7_tests` (committed to repo; NOT applied to live DB — run manually in SQL Editor)
+**Depends on:** Real Supabase Auth user + `players` row + GitHub Pages configured
 
-**Blocker:** Need at least one live auth user before any test can be run via the client.
+**Setup completed:**
+- ✅ Auth user created via Supabase dashboard
+- ✅ `players` row inserted linking `auth.uid()` to `character_id=1`
+- ✅ GitHub Pages configured (source: `main`, folder: `/docs`)
 
-**Setup steps before testing:**
-1. Create auth user via Supabase dashboard (Authentication → Users → Invite / Add user)
-2. Insert `players` row: `INSERT INTO players (player_id, controlled_character_id) VALUES (auth_user_uuid, 1);`
-3. Configure GitHub Pages (Settings → Pages → source: `main`, folder: `/docs`)
-4. Run `npm install && npm run build` locally or push to trigger the deploy workflow
+**How to run the test suite:**
+1. Open `backend/migrations/004_milestone7_tests.sql`
+2. Replace `PLAYER_A_UUID` with your real auth user UUID
+3. Optionally replace `PLAYER_B_UUID` with a second auth user UUID for RLS isolation test
+4. Paste into Supabase SQL Editor and run
+5. Inspect each result set — expected outcomes documented inline
+6. Change `ROLLBACK` → `COMMIT` at the bottom only if you want fixtures persisted for live client testing
 
-**What to test:**
-- [ ] Race resolution: simultaneous submits from 10+ players — verify `queue_pos` ordering in `turn_queue`
-- [ ] Branch limit: attempt 4th fork on a lineage — verify rejection via `COUNT(*)` check
-- [ ] Backward time travel: verify chronicle slice duplication and attribute replacement
-- [ ] RLS isolation: confirm player A cannot read player B's chronicle rows
-- [ ] Cooldown bypass: attempt client-side cooldown skip — verify server `submit_timestamp` race logic still resolves correctly
-- [ ] Natural progression: verify environment cycles (every 100u), material changes (80u major / 3 durations minor), population spawns (every 50 durations)
-- [ ] `setting_id` required: verify Edge Function returns 500 if client omits `details.setting_id`
+**Tests in `004_milestone7_tests.sql`:**
+- **Test 1** — `setting_id` NOT NULL: good insert succeeds; bad insert (commented) raises error
+- **Test 2** — `advance_turn` trigger: two chronicle inserts produce incrementing `turn_number`
+- **Test 3** — `turn_queue` race ordering: earlier `submit_timestamp` → `queue_pos = 1`
+- **Test 4** — Branch limit count: 3 forks inserted; query shows Edge Function would block 4th
+- **Test 5** — Natural progression schedule: generates expected ticks for environment/material/population cycles across 500 time units
+- **Test 6** — Travel duration formula: validates Edge Function math against live `physical_environments` + `materials` + `characters` rows
+- **Test 7** — RLS isolation data setup: inserts player B chronicle row; client-side sign-in test required to confirm RLS blocks cross-player reads
+
+**Remaining client-side checks (manual, requires live frontend):**
+- [ ] Sign in as player A → submit one action → confirm chronicle panel updates and cooldown resets on Realtime broadcast
+- [ ] Sign in as player B → confirm player A's chronicle rows do not appear
+- [ ] Attempt 4th branch fork from client → confirm Edge Function returns 409
+- [ ] Attempt submit without `setting_id` from client → confirm 500 response
 
 ---
 
 ### 🔲 Milestone 8 — Polish, Docs & Deploy Pipeline
 **Status:** Not started
-**Depends on:** Milestone 7 passing
+**Depends on:** Milestone 7 client-side checks passing
 
 **What to build:**
 - [ ] `README.md` — project overview, local dev setup, deploy instructions
@@ -263,10 +267,11 @@ Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broad
 | Supabase Project | andredavisme's Project (`hhyhulqngdkwsxhymmcd`) |
 | Region | `us-west-2` |
 | Project URL | `https://hhyhulqngdkwsxhymmcd.supabase.co` |
-| Live URL (after Pages config) | `https://andredavisme.github.io/chronicle-worlds/` |
+| Live URL | `https://andredavisme.github.io/chronicle-worlds/` |
 | Migration 001 | `001_core_schema` — 10 base tables; `events.setting_id` NOT NULL |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` — proposal intake tables (separate from game logic) |
+| Migration 004 | `004_milestone7_tests` — full edge-case test suite (run manually; wraps in ROLLBACK) |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v2, ACTIVE) |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
