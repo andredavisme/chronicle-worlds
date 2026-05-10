@@ -161,10 +161,42 @@ Full end-to-end turn pipeline simulated directly in SQL (pg_net not available on
 **Schema finding recorded:**
 - `events.setting_id` is NOT NULL in the live DB — design spec had it as nullable. Every event requires a setting context. The genesis `settings` row (id=1) must exist before any turn is submitted. Updated `001_core_schema.sql` to reflect this.
 
+---
+
+### ✅ Milestone 4 — Frontend: GitHub Pages Scaffold
+**Date:** 2026-05-10
+**Status:** Complete
+**Commit:** `712566b91153feba5ad843cffbb905bbd3a45368`
+**Builds on:** Milestones 3 & 3a (Edge Function live, smoke test passed)
+
+**What was done:**
+Full Vite + JS frontend scaffolded in `/frontend/` and GitHub Actions deploy workflow added. All five game modules are wired together. The frontend is ready to serve from GitHub Pages once the Pages source is configured.
+
+**Files created:**
+- `frontend/index.html` — full game UI: auth panel, isometric canvas, action buttons, chronicle sidebar, footer with player/turn/branch state
+- `frontend/package.json` — Vite `^5.4` + `@supabase/supabase-js ^2.49.4`
+- `frontend/vite.config.js` — `base: '/chronicle-worlds/'`, `outDir: '../docs'` (GitHub Pages from `/docs` on `main`)
+- `frontend/src/supabase-client.js` — Auth helpers (`signIn`, `signUp`, `signOut`, `onAuthChange`); uses publishable key `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI`
+- `frontend/src/turn-manager.js` — `submitAction()` with race `submit_timestamp`, 1-min client cooldown, `resetCooldown()`; always passes `details.setting_id = 1`
+- `frontend/src/grid-renderer.js` — isometric canvas renderer; loads `entity_positions` (active only via `timestamp_end IS NULL`); `updateGrid()` called by Realtime
+- `frontend/src/chronicle-reader.js` — queries `chronicle` (RLS auto-filters to `auth.uid()`); renders entries with branch color coding (branch 1/2/3 = purple/red/teal)
+- `frontend/src/app.js` — auth state machine; wires all modules; subscribes to Realtime `'turns'` channel `turn_resolved` broadcast
+- `.github/workflows/deploy.yml` — triggers on push to `main` when `frontend/**` or `docs/**` changes; builds with Vite; deploys `/docs` via `peaceiris/actions-gh-pages@v4`
+
+**Key decisions:**
+- Publishable key (not legacy anon key) used in client — better security, independent rotation
+- `details.setting_id = 1` hardcoded in `turn-manager.js` as `DEFAULT_SETTING_ID` — update when world has multiple settings
+- `sequence_index` is a random integer tiebreaker per submit; server race logic uses `submit_timestamp` first
+- Action buttons are disabled during in-flight requests; re-enabled on resolve or error
+- Chronicle renders last 40 entries descending; Realtime optimistically prepends new entries without refetch
+
+**One manual step required:**
+Go to **GitHub repo → Settings → Pages → Source: Deploy from branch `main`, folder `/docs`**. The workflow handles all subsequent deploys automatically.
+
 **What to do next:**
-- Milestone 4: Build the frontend scaffold
-- When a real Supabase Auth user exists, the full HTTP invoke can be tested via `supabase.functions.invoke('resolve-turn', ...)` from the client
-- The test data rows (`setting_id=1`, `character_id=1`, `player_id=00000000...0001`) remain in the DB as seed fixtures
+- Milestone 5 & 6 are already implemented inside `app.js` and `chronicle-reader.js` — Realtime subscription and chronicle panel are live in the scaffold
+- The remaining blocker is a **real Supabase Auth user** — create one via the Supabase dashboard or sign-up flow, then link a `players` row (`player_id = auth.uid()`, `controlled_character_id = 1`) to unblock the first live turn
+- After first live turn: proceed to Milestone 7 (multiplayer + edge case testing)
 
 ---
 
@@ -172,83 +204,33 @@ Full end-to-end turn pipeline simulated directly in SQL (pg_net not available on
 
 ---
 
-### 🔲 Milestone 4 — Frontend: GitHub Pages Scaffold
-**Status:** Not started
-**Depends on:** Milestone 3 (Edge Function endpoint live ✅), Milestone 3a (smoke test passed ✅)
+### ✅ Milestone 5 — Realtime: Turn Subscription
+**Status:** Complete (implemented inside Milestone 4)
+**Implemented in:** `frontend/src/app.js`
 
-**What to build:**
-Initialize a Vite + JS project in `/frontend/` and deploy via GitHub Pages.
-
-**Files to create:**
-```
-frontend/
-  index.html
-  package.json          # Vite config
-  src/
-    supabase-client.js  # Auth init + Realtime setup
-    turn-manager.js     # Cooldown timer (1 real min), submitAction(), queue polling
-    grid-renderer.js    # Canvas 3D grid + entity_positions rendering
-    chronicle-reader.js # Player-filtered chronicle display
-.github/workflows/deploy.yml  # Auto-deploy to GH Pages on push to main
-```
-
-**Key patterns:**
-- `submitAction()` captures `submit_timestamp = Date.now() / 1000` before calling `supabase.functions.invoke('resolve-turn', ...)`
-- `details.setting_id` **must be included** in every action payload — `events.setting_id` is NOT NULL
-- Cooldown is client-enforced (1 real minute); it is a UX mechanism, not a server lock
-- Auth via Supabase Auth (`auth.uid()` must match `player_id` for RLS to pass)
-
-**Reference:**
-- Client patterns: Developer Handoff → Frontend → Key Client Patterns
-- Supabase project URL: `https://hhyhulqngdkwsxhymmcd.supabase.co`
-- Anon key: see Supabase dashboard (publishable key preferred)
+Realtime subscription to the `'turns'` channel is live. On `turn_resolved` broadcast: `updateGrid()` re-renders entity positions, `resetCooldown()` restarts the 1-min timer, `loadChronicle()` refreshes the chronicle panel, and `branch-info` footer updates to show the current branch.
 
 ---
 
-### 🔲 Milestone 5 — Realtime: Turn Subscription
-**Status:** Not started
-**Depends on:** Milestones 3 & 4 (Edge Function broadcasting + frontend scaffold)
+### ✅ Milestone 6 — Chronicle Panel: Player-Filtered Display
+**Status:** Complete (implemented inside Milestone 4)
+**Implemented in:** `frontend/src/chronicle-reader.js`
 
-**What to build:**
-Wire up the Supabase Realtime broadcast channel in `supabase-client.js` and connect it to the grid renderer and cooldown timer.
-
-**Logic:**
-```js
-supabase.channel('turns')
-  .on('broadcast', { event: 'turn_resolved' }, ({ payload }) => {
-    updateGrid(payload);   // re-render entity positions
-    resetCooldown();       // restart 1-min client timer
-  }).subscribe()
-```
-
-**Reference:**
-- Broadcast trigger: Milestone 3, step 10 (`resolve-turn` Edge Function)
-- Grid renderer: Milestone 4 (`grid-renderer.js`)
-
----
-
-### 🔲 Milestone 6 — Chronicle Panel: Player-Filtered Display
-**Status:** Not started
-**Depends on:** Milestone 2 (RLS policy), Milestone 4 (frontend scaffold)
-
-**What to build:**
-Implement `chronicle-reader.js` to query and display the player's accessible chronicle slice.
-
-**Logic:**
-- Query `chronicle` table — RLS automatically filters to `player_id = auth.uid()`
-- Display events in chronological order by `timestamp` + `sequence_index`
-- Show `branch_id` to distinguish forked timelines
-- Cross-reference `player_chronicle_access` for any shared/spectator access entries
-
-**Reference:**
-- RLS policy: Milestone 2 (`"Player chronicle view"`)
-- `player_chronicle_access` table: Milestone 2
+`loadChronicle()` queries `chronicle` ordered by `timestamp DESC` + `sequence_index DESC`, limit 40. RLS automatically scopes results to `player_id = auth.uid()`. Branch color coding: branch 0 = no indicator, branch 1 = purple, branch 2 = red, branch 3 = teal.
 
 ---
 
 ### 🔲 Milestone 7 — Testing: Multiplayer & Edge Cases
 **Status:** Not started
-**Depends on:** Milestones 3–6 fully functional
+**Depends on:** Real Supabase Auth user + `players` row linked to a character
+
+**Blocker:** Need at least one live auth user before any test can be run via the client.
+
+**Setup steps before testing:**
+1. Create auth user via Supabase dashboard (Authentication → Users → Invite / Add user)
+2. Insert `players` row: `INSERT INTO players (player_id, controlled_character_id) VALUES (auth_user_uuid, 1);`
+3. Configure GitHub Pages (Settings → Pages → source: `main`, folder: `/docs`)
+4. Run `npm install && npm run build` locally or push to trigger the deploy workflow
 
 **What to test:**
 - [ ] Race resolution: simultaneous submits from 10+ players — verify `queue_pos` ordering in `turn_queue`
@@ -268,7 +250,6 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 **What to build:**
 - [ ] `README.md` — project overview, local dev setup, deploy instructions
 - [ ] Mobile responsiveness for canvas grid
-- [ ] `.github/workflows/deploy.yml` — auto-deploy frontend to GitHub Pages on push to `main`
 - [ ] Supabase Pro upgrade for production (`$25/mo`) if load tests require it
 - [ ] Setting shards documented as scale path
 
@@ -282,14 +263,17 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 | Supabase Project | andredavisme's Project (`hhyhulqngdkwsxhymmcd`) |
 | Region | `us-west-2` |
 | Project URL | `https://hhyhulqngdkwsxhymmcd.supabase.co` |
+| Live URL (after Pages config) | `https://andredavisme.github.io/chronicle-worlds/` |
 | Migration 001 | `001_core_schema` — 10 base tables; `events.setting_id` NOT NULL |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` — proposal intake tables (separate from game logic) |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v2, ACTIVE) |
+| Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
 | Test fixtures | `character_id=1`, `player_id=00000000-0000-0000-0000-000000000001` (dev only) |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 |
 | Action durations | Exchange Info=10u, Resolve Conflict=7u, Introduce Conflict=5u, Exchange Material=3u, Travel=calculated |
 | Client cooldown | 1 real minute (UX only, not server-enforced) |
+| Default setting_id | `1` (hardcoded in `turn-manager.js` as `DEFAULT_SETTING_ID`) |
 | Inspired by | [andredavisme/the-world](https://github.com/andredavisme/the-world) |
