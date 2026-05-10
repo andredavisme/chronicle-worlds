@@ -83,41 +83,65 @@ Extended the core schema with player identity, turn mechanics, time-travel branc
 
 ---
 
-## Up Next
+### ✅ Milestone 3 — Backend: Edge Function `resolve-turn`
+**Date:** 2026-05-10
+**Status:** Complete
+**Deployed via:** Supabase MCP (`deploy_edge_function`)
+**Function ID:** `a68468fa-a326-4f75-9d51-72a73fa8e9c2`
+**Builds on:** Milestones 1 & 2 (all tables, `turn_queue` view, `players`, `branches`, `chronicle`)
+
+**What was done:**
+Deployed the `resolve-turn` Supabase Edge Function at `functions/resolve-turn/index.ts`. This is the core server-side turn engine — all client actions route through it.
+
+**Logic implemented (in order):**
+1. Validate `action` and `player_id` from request body
+2. Check `turn_queue` view — if `queue_pos > 1`, return `202 { status: 'queued' }`
+3. Resolve the player's `controlled_character_id` from the `players` table
+4. Compute `duration_units` from `DURATION_MAP` (or `computeTravelDuration()` for `travel` action)
+5. Check branch fork limit — if `details.branch_fork` is set, count `branches WHERE parent_branch_id = X`; reject with `409` if ≥ 3; otherwise insert new branch row
+6. Insert into `events` with `resolution_state = 'pending'`
+7. Call `applyModifiers()` — inserts one `attribute_modifiers` row per action type
+8. Insert into `chronicle` (links `event_id`, `character_id`, `player_id`, `branch_id`, timestamps)
+9. Update `events.resolution_state = 'resolved'`
+10. Broadcast `turn_resolved` to Supabase Realtime channel `'turns'`
+11. Return `200 { status: 'resolved', event }`
+
+**Modifier map (per action):**
+- `exchange_information` → `inspiration +3`
+- `resolve_conflict` → `health +3`
+- `introduce_conflict` → `health -3`
+- `exchange_material` → `wealth +3`
+- `travel` → no modifier (duration only)
+
+**Travel duration formula:**
+```
+base = (density + hydration) / 2
+charPenalty = size / max(health, 0.1)
+matBonus = durability * implementation
+inspBonus = 0.9 if inspiration > 0 else 1
+duration = max(1, round(base * charPenalty / matBonus * inspBonus))
+```
+
+**Key decisions:**
+- Uses `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS for server-side writes; RLS still governs all client reads
+- JWT verification enabled (`verify_jwt: true`) — client must pass a valid Supabase Auth token
+- `event.eventid` (snake_case from DB) used as PK reference — verify column name matches schema if errors arise
+- Chronicle insert triggers `advance_turn()` automatically (Milestone 2 trigger)
+- Branch fork insert happens before event insert so `branch_id` is available
+
+**What to do next:**
+- Milestone 4: Build the frontend scaffold (Vite + JS, GitHub Pages)
+- First test: Insert a `players` row + `characters` row manually in Supabase, then invoke the function via `curl` or Supabase dashboard
 
 ---
 
-### 🔲 Milestone 3 — Backend: Edge Function `resolve-turn`
-**Status:** Not started
-**Depends on:** Milestones 1 & 2 (all tables, `turn_queue` view, `players`, `branches`, `chronicle`)
-
-**What to build:**
-Deploy a Supabase Edge Function at `/functions/resolve-turn/index.ts` that handles turn submission and race resolution.
-
-**Logic to implement:**
-1. Accept `{ action, player_id, details }` from the client
-2. Check `turn_queue` view — if `queue_pos > 1` for this player, return `202 { status: 'queued' }`
-3. Map action to duration: `exchange_information=10`, `resolve_conflict=7`, `introduce_conflict=5`, `exchange_material=3`; Travel = computed from `density`, `hydration`, `size`, `health`, `durability`, `implementation`
-4. Insert into `events` with `resolution_state = 'pending'`
-5. Call `applyModifiers()` — inserts rows into `attribute_modifiers` based on action type
-6. Update `events.resolution_state = 'resolved'`
-7. Broadcast to Supabase Realtime channel `'turns'` with `{ player_id, turn_number }`
-8. Return `200 { status: 'resolved', event }`
-
-**Branch fork logic (for time-travel actions):**
-- Before insert: `SELECT COUNT(*) FROM branches WHERE parent_branch_id = X` — reject if ≥ 3
-- On backward travel: duplicate chronicle slice to new `branch_id`; replace character attributes with current values
-
-**Reference files:**
-- Edge Function scaffold: see Developer Handoff → Backend: Edge Functions
-- `turn_queue` view: Milestone 2
-- Duration map and modifier logic: Developer Handoff → Game Design → Actions table
+## Up Next
 
 ---
 
 ### 🔲 Milestone 4 — Frontend: GitHub Pages Scaffold
 **Status:** Not started
-**Depends on:** Milestone 3 (Edge Function endpoint live)
+**Depends on:** Milestone 3 (Edge Function endpoint live ✅)
 
 **What to build:**
 Initialize a Vite + JS project in `/frontend/` and deploy via GitHub Pages.
@@ -163,7 +187,7 @@ supabase.channel('turns')
 ```
 
 **Reference:**
-- Broadcast trigger: Milestone 3, step 7 (`resolve-turn` Edge Function)
+- Broadcast trigger: Milestone 3, step 10 (`resolve-turn` Edge Function)
 - Grid renderer: Milestone 4 (`grid-renderer.js`)
 
 ---
@@ -199,11 +223,6 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 - [ ] Cooldown bypass: attempt client-side cooldown skip — verify server `submit_timestamp` race logic still resolves correctly
 - [ ] Natural progression: verify environment cycles (every 100u), material changes (80u major / 3 durations minor), population spawns (every 50 durations)
 
-**Reference:**
-- Race resolution logic: Milestone 3 (`turn_queue` view + Edge Function)
-- Branch rules: Milestone 2 (branches table notes)
-- Natural progression rules: Developer Handoff → Game Design → Natural Progression
-
 ---
 
 ### 🔲 Milestone 8 — Polish, Docs & Deploy Pipeline
@@ -217,10 +236,6 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 - [ ] Supabase Pro upgrade for production (`$25/mo`) if load tests require it
 - [ ] Setting shards documented as scale path
 
-**Reference:**
-- Repo structure: Developer Handoff → Frontend → Repo Structure
-- Cost/timeline: Developer Handoff → Development Timeline & Costs
-
 ---
 
 ## Quick Reference
@@ -232,6 +247,7 @@ Implement `chronicle-reader.js` to query and display the player's accessible chr
 | Region | `us-west-2` |
 | Migration 001 | `001_core_schema` — 10 base tables |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
+| Edge Function | `resolve-turn` (ID: `a68468fa-a326-4f75-9d51-72a73fa8e9c2`, v1, ACTIVE) |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 |
 | Action durations | Exchange Info=10u, Resolve Conflict=7u, Introduce Conflict=5u, Exchange Material=3u, Travel=calculated |
