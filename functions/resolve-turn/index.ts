@@ -28,32 +28,15 @@ function computeTravelDuration(details: Record<string, number>): number {
 async function applyModifiers(
   supabase: ReturnType<typeof createClient>,
   action: string,
-  playerId: string,
   eventId: number,
   characterId: number,
   now: number
 ) {
   const modifiersByAction: Record<string, object> = {
-    exchange_information: {
-      target_attribute: 'inspiration',
-      operator: '+',
-      value: 3,
-    },
-    resolve_conflict: {
-      target_attribute: 'health',
-      operator: '+',
-      value: 3,
-    },
-    introduce_conflict: {
-      target_attribute: 'health',
-      operator: '-',
-      value: 3,
-    },
-    exchange_material: {
-      target_attribute: 'wealth',
-      operator: '+',
-      value: 3,
-    },
+    exchange_information: { target_attribute: 'inspiration', operator: '+', value: 3 },
+    resolve_conflict:     { target_attribute: 'health',      operator: '+', value: 3 },
+    introduce_conflict:   { target_attribute: 'health',      operator: '-', value: 3 },
+    exchange_material:    { target_attribute: 'wealth',      operator: '+', value: 3 },
   };
 
   const mod = modifiersByAction[action];
@@ -84,7 +67,7 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'Missing action or player_id' }), { status: 400 });
     }
 
-    // --- 1. Check queue position ---
+    // 1. Check queue position
     const { data: queue } = await supabase
       .from('turn_queue')
       .select('queue_pos')
@@ -95,7 +78,7 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ status: 'queued' }), { status: 202 });
     }
 
-    // --- 2. Resolve player's character ---
+    // 2. Resolve player's character
     const { data: player, error: playerErr } = await supabase
       .from('players')
       .select('controlled_character_id')
@@ -107,7 +90,7 @@ serve(async (req: Request) => {
     }
     const characterId: number = player.controlled_character_id;
 
-    // --- 3. Compute duration ---
+    // 3. Compute duration
     let duration: number;
     if (action === 'travel') {
       duration = computeTravelDuration(details);
@@ -122,7 +105,7 @@ serve(async (req: Request) => {
     const submitTimestamp: number = details.submit_timestamp ?? now;
     const sequenceIndex: number = details.sequence_index ?? 0;
 
-    // --- 4. Check branch fork limit (time-travel backward only) ---
+    // 4. Branch fork limit check
     if (details.branch_fork && details.parent_branch_id !== undefined) {
       const { count } = await supabase
         .from('branches')
@@ -133,7 +116,6 @@ serve(async (req: Request) => {
         return new Response(JSON.stringify({ error: 'Branch fork limit reached (max 3)' }), { status: 409 });
       }
 
-      // Insert new branch
       await supabase.from('branches').insert({
         fork_timestamp: now,
         player_id,
@@ -141,7 +123,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // --- 5. Insert event ---
+    // 5. Insert event
     const { data: event, error: eventErr } = await supabase
       .from('events')
       .insert({
@@ -155,23 +137,25 @@ serve(async (req: Request) => {
         resolution_state: 'pending',
         details: JSON.stringify(details),
       })
-      .select()
+      .select('event_id, turn_number')
       .single();
 
     if (eventErr || !event) {
       return new Response(JSON.stringify({ error: eventErr?.message ?? 'Event insert failed' }), { status: 500 });
     }
 
-    // --- 6. Apply attribute modifiers ---
-    await applyModifiers(supabase, action, player_id, event.eventid, characterId, now);
+    const eventId: number = event.event_id;
 
-    // --- 7. Insert chronicle entry ---
+    // 6. Apply attribute modifiers
+    await applyModifiers(supabase, action, eventId, characterId, now);
+
+    // 7. Insert chronicle entry
     const { error: chronicleErr } = await supabase.from('chronicle').insert({
       timestamp: now,
       sequence_index: sequenceIndex,
       character_id: characterId,
       setting_id: details.setting_id ?? null,
-      event_id: event.eventid,
+      event_id: eventId,
       player_id,
       branch_id: details.branch_id ?? 0,
       submit_timestamp: submitTimestamp,
@@ -182,13 +166,13 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: chronicleErr.message }), { status: 500 });
     }
 
-    // --- 8. Update event resolution state ---
+    // 8. Update event to resolved
     await supabase
       .from('events')
       .update({ resolution_state: 'resolved' })
-      .eq('eventid', event.eventid);
+      .eq('event_id', eventId);
 
-    // --- 9. Broadcast to Realtime ---
+    // 9. Broadcast to Realtime
     await supabase.channel('turns').send({
       type: 'broadcast',
       event: 'turn_resolved',
