@@ -7,8 +7,8 @@
 -- RLS isolation data setup.
 --
 -- HOW TO RUN:
---   1. Replace PLAYER_A_UUID and PLAYER_B_UUID with real
---      auth.users UUIDs from the Supabase dashboard.
+--   1. Replace PLAYER_A_UUID with your real auth user UUID from
+--      the Supabase dashboard (Authentication → Users).
 --   2. Paste the entire file into Supabase SQL Editor.
 --   3. Run — inspect each SELECT result set in order.
 --   4. This migration is wrapped in a transaction and ROLLS BACK
@@ -48,9 +48,10 @@ SELECT
 -- ─────────────────────────────────────────────
 -- 1. FIXTURES
 -- ─────────────────────────────────────────────
--- Genesis setting (required; events.setting_id NOT NULL).
-INSERT INTO settings (setting_id, x, y, z, time)
-VALUES (1, 0, 0, 0, 0)
+-- Genesis setting.
+-- Columns: setting_id, time_unit, origin_x, origin_y, origin_z, inspiration
+INSERT INTO settings (setting_id, time_unit, origin_x, origin_y, origin_z, inspiration)
+VALUES (1, 0, 0, 0, 0, NULL)
 ON CONFLICT (setting_id) DO NOTHING;
 
 -- Primary character.
@@ -81,6 +82,7 @@ WHERE i.player_b <> '00000000-0000-0000-0000-000000000000'::uuid
 ON CONFLICT (player_id) DO NOTHING;
 
 -- Physical environment for travel duration math.
+-- Columns: environment_id, setting_id, age, temperature, density, hydration, population, grid_cell_id
 INSERT INTO physical_environments (
   environment_id, setting_id, temperature, density, hydration, population
 )
@@ -88,16 +90,14 @@ VALUES (1, 1, 20, 4, 6, 1)
 ON CONFLICT (environment_id) DO NOTHING;
 
 -- Material for travel duration math.
-INSERT INTO materials (
-  material_id, event_id, source_character_id, durability, implementation
-)
-VALUES (1, NULL, 1, 2, 2)
+-- Columns: material_id, source, age, durability, implementation, inspiration
+INSERT INTO materials (material_id, source, durability, implementation)
+VALUES (1, 'test', 2, 2)
 ON CONFLICT (material_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────
 -- TEST 1: setting_id NOT NULL enforcement
--- Expected: the good insert succeeds; the bad
--- insert (commented out) would raise an error.
+-- Expected: the good insert succeeds.
 -- ─────────────────────────────────────────────
 INSERT INTO events (
   event_type, duration_units, start_timestamp,
@@ -118,8 +118,7 @@ SELECT 'TEST 1 PASS — setting_id insert succeeded' AS result;
 
 -- ─────────────────────────────────────────────
 -- TEST 2: advance_turn trigger increments turn_number
--- Expected: two chronicle inserts for player A
--- produce turn_number = N and N+1 automatically.
+-- Expected: two chronicle inserts produce turn_number = N and N+1.
 -- ─────────────────────────────────────────────
 WITH e1 AS (
   INSERT INTO events (
@@ -165,7 +164,6 @@ SELECT
   EXTRACT(EPOCH FROM NOW()), 2
 FROM e2, _test_inputs i;
 
--- Inspect: turn_number should increment 1 → 2
 SELECT
   'TEST 2' AS test,
   chronicle_id,
@@ -188,7 +186,7 @@ WITH p1 AS (
   VALUES (
     'introduce_conflict', 5,
     EXTRACT(EPOCH FROM NOW()), 'pending', 1,
-    1000.001   -- earlier
+    1000.001
   )
   RETURNING event_id
 )
@@ -210,7 +208,7 @@ WITH p2 AS (
   VALUES (
     'resolve_conflict', 7,
     EXTRACT(EPOCH FROM NOW()), 'pending', 1,
-    1000.002   -- later
+    1000.002
   )
   RETURNING event_id
 )
@@ -237,9 +235,6 @@ LIMIT 5;
 
 -- ─────────────────────────────────────────────
 -- TEST 4: branch limit count query
--- The Edge Function rejects a 4th fork using:
---   SELECT COUNT(*) FROM branches WHERE parent_branch_id = X
--- DB itself does NOT enforce max-3 (app-layer rule).
 -- Expected: count = 3 for parent_branch_id = 0.
 -- ─────────────────────────────────────────────
 INSERT INTO branches (fork_timestamp, player_id, parent_branch_id)
@@ -266,10 +261,7 @@ GROUP BY parent_branch_id;
 
 -- ─────────────────────────────────────────────
 -- TEST 5: natural progression schedule
--- Generates expected event ticks for 500 time units.
--- No automation in DB yet — these are design-doc
--- validation queries for Milestone 7 sign-off.
--- Expected: cycles appear at correct intervals.
+-- Expected: cycles at correct intervals.
 -- ─────────────────────────────────────────────
 SELECT
   'TEST 5 — environment/material/population schedule' AS test;
@@ -287,7 +279,6 @@ WHERE t % 100 = 0
    OR t % 50  = 0
 ORDER BY t;
 
--- Material minor change every 3 event-duration-units:
 SELECT
   d AS duration_unit,
   'material_minor_change' AS event
@@ -299,7 +290,7 @@ ORDER BY d;
 -- Uses environment_id=1 (density=4, hydration=6)
 -- and material_id=1 (durability=2, implementation=2)
 -- with character health=10, size=1, inspiration=0.
--- Expected: duration = max(1, round(5 * 0.1 / 4 * 1)) = 1
+-- Expected: computed_duration_units = 1
 -- ─────────────────────────────────────────────
 SELECT
   'TEST 6 — travel duration formula' AS test,
@@ -319,8 +310,6 @@ WHERE pe.environment_id = 1
 
 -- ─────────────────────────────────────────────
 -- TEST 7: RLS isolation data setup
--- Inserts a chronicle row for player B so a live
--- client test can verify player A cannot see it.
 -- Skipped if player_b is the all-zeros placeholder.
 -- ─────────────────────────────────────────────
 WITH eb AS (
@@ -361,13 +350,11 @@ WHERE player_id IN (
 GROUP BY player_id
 ORDER BY player_id;
 
--- RLS client-side verification (manual):
+-- Manual RLS verification:
 --   1. Sign in as player A in the frontend.
 --   2. Chronicle panel must show ONLY player A rows.
 --   3. Sign in as player B.
 --   4. Chronicle panel must show ONLY player B rows.
--- The "Player chronicle view" policy (002_multiplayer_extensions)
--- enforces USING (player_id = auth.uid()) — no API filtering needed.
 
 -- ─────────────────────────────────────────────
 -- ROLLBACK — no test data persisted.
