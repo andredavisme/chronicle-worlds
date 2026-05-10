@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - 'frontend/**'
-      - 'docs/**'
 
 jobs:
   build-and-deploy:
