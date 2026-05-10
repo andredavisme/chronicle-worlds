@@ -54,8 +54,9 @@ INSERT INTO physical_environments (
 ) VALUES (100, 1, 20, 4, 6, 1)
 ON CONFLICT (environment_id) DO NOTHING;
 
+-- materials.durability and implementation are text in the live schema
 INSERT INTO materials (material_id, source, durability, implementation)
-VALUES (100, 'test', 2, 2)
+VALUES (100, 'test', '2', '2')
 ON CONFLICT (material_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────
@@ -192,14 +193,15 @@ ORDER BY d;
 
 -- ─────────────────────────────────────────────
 -- TEST 6: travel duration formula
+-- materials.durability and implementation are text — cast to numeric.
 -- Expected: computed_duration_units = 1
 -- ─────────────────────────────────────────────
 SELECT
   'TEST 6 — travel duration formula' AS test,
   GREATEST(1, ROUND(
     ((pe.density + pe.hydration) / 2.0)
-    * (c.size / GREATEST(c.health, 0.1))
-    / (m.durability * m.implementation)
+    * (c.size / GREATEST(c.health::numeric, 0.1))
+    / (m.durability::numeric * m.implementation::numeric)
     * (CASE WHEN c.inspiration > 0 THEN 0.9 ELSE 1 END)
   ))::int AS computed_duration_units
 FROM
