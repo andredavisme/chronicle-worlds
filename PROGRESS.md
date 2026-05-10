@@ -20,108 +20,62 @@ This document is the **single source of truth** for development progress. Each m
 
 ---
 
-### ✅ Milestone 1 — Database Schema: Core Tables
-**Date:** 2026-05-10 | **Migration:** `001_core_schema`
-
-Tables: `settings`, `grid_cells`, `characters`, `physical_environments`, `events`, `materials`, `entity_positions`, `chronicle`, `attribute_modifiers`, `relationship_effects`. `events.setting_id` NOT NULL; all PKs are integers.
+### ✅ Milestones 1–8b — (see prior entries)
+All prior milestones complete. Schema, Edge Function, frontend scaffold, Realtime, testing, infra fixes, mobile responsiveness, migration repo sync. See commit history for details.
 
 ---
 
-### ✅ Milestone 2 — Database Schema: Multiplayer Extensions
-**Date:** 2026-05-10 | **Migration:** `002_multiplayer_extensions`
-
-Tables: `players`, `branches`, `player_chronicle_access`. RLS on `chronicle`. `advance_turn()` trigger. `turn_queue` view. `branch_id = 0` = root; max 3 forks enforced in Edge Function.
-
----
-
-### ✅ Milestone 3 — Backend: Edge Function `resolve-turn`
-**Date:** 2026-05-10 | **Function ID:** `a68468fa` (v3, ACTIVE)
-
-Pipeline: validate → queue check → branch check → insert event → apply modifiers → insert chronicle → resolve → broadcast → return. `verify_jwt: false` + manual JWT validation to fix CORS preflight block.
-
-**Modifier map:** Exchange Info=`inspiration+3` · Resolve Conflict=`health+3` · Introduce Conflict=`health-3` · Exchange Material=`wealth+3` · Travel=duration only
-
----
-
-### ✅ Milestone 3a — Smoke Test: Full Turn Pipeline
-**Date:** 2026-05-10
-
-All 5 pipeline steps verified in SQL.
-
----
-
-### ✅ Milestone 4 — Frontend: GitHub Pages Scaffold
-**Date:** 2026-05-10 | **Commit:** `712566b`
-
-Full Vite + JS frontend in `/frontend/`. Modules: `supabase-client.js`, `turn-manager.js`, `grid-renderer.js`, `chronicle-reader.js`, `app.js`. GitHub Actions deploy workflow.
-
----
-
-### ✅ Milestone 5 — Realtime: Turn Subscription
-**Status:** Complete (inside Milestone 4)
-
----
-
-### ✅ Milestone 6 — Chronicle Panel: Player-Filtered Display
-**Status:** Complete (inside Milestone 4)
-
----
-
-### ✅ Milestone 7 — Testing: Multiplayer & Edge Cases
-**Date:** 2026-05-10 | **Migrations:** `004_milestone7_tests` (ROLLBACK) · `005_persist_test_fixtures` (COMMIT)
-
-All DB-side and browser tests verified live: genesis setting, advance_turn trigger, queue, branch limit (3), travel formula, RLS isolation.
-
-**Fixture reference:**
-| Fixture | Value |
-|---|---|
-| Player A | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` (`dev@chronicle.local`) |
-| Player B | `00000000-0000-0000-0000-000000000002` (stub) |
-| Genesis setting | `setting_id=1`, origin `(0,0,0)` |
-| Player A branches | 3 forks from root (at cap) |
-| Test player | `d30fe4d9-a9f3-43a2-947d-30c8d9d2cdd5` (`test@chroincle.local`, character_id=7) |
-
----
-
-### ✅ Milestone 8a — Session 2 Infrastructure Fixes
-**Date:** 2026-05-10
-
-- CORS block fixed (verify_jwt + manual auth)
-- `Player not found` 500 fixed (`006_auto_provision_players`)
-- Null PK 500 fixed (`007_add_pk_sequences`)
-- RLS blocking trigger fixed (`008_rls_policies_and_trigger_fix`)
-
----
-
-### ✅ Milestone 8b — Polish & Repo Sync
+### ✅ Milestone 9 — Natural Progression Loop
 **Date:** 2026-05-10 | **Status:** Complete
+**Migration:** `009_natural_progression_loop` | **Commit:** `3c4a1da`
 
-**Completed:**
-- [x] Migrations 005–008 committed to `backend/migrations/` (commit `0030e6c`)
-- [x] Mobile responsiveness (commit `cab16a2`)
-  - Responsive CSS: desktop = `1fr 320px` sidebar, mobile ≤767px = full-width canvas + bottom drawer
-  - `#mobile-panel-toggle` button slides sidebar up from bottom (55vh)
-  - Action buttons reflow to 2-column grid on mobile for easy tapping
-  - `grid-renderer.js`: `getTileSize()` scales `TILE_W` from 20–48px based on `canvas.width / 800`, recomputed on every `resize` + `render`
-  - Labels hidden when tile width < 28px to avoid clutter
-  - `height: 100dvh` (dynamic viewport height) fixes mobile browser chrome overlap
-- [x] Scale path: Supabase Pro $25/mo; scale via setting shards (documented in README/pitch)
+**What was built:**
+
+#### DB (migration 009)
+- `world_tick_state` singleton table — tracks `duration_unit` (total ticks) + `last_tick_at`; `REPLICA IDENTITY FULL` for Realtime
+- `proc_words` table — vocabulary for procedural generation (source: stone/wood/bone/metal/clay/silk/ice/glass; impl: carved/woven/cast/forged/grown/etched; rel_type: ally/rival/kin/trade/debt/myth)
+- Sequences added for `characters`, `settings`, `physical_environments`, `materials`, `relationship_effects`
+- `world_tick()` PL/pgSQL function (SECURITY DEFINER):
+
+| du modulus | Action |
+|---|---|
+| every tick | `settings.time_unit +1`, `characters.age +1` (active, positioned) |
+| du % 3 | minor material tick: `materials.durability -1`, `age +1` |
+| du % 50 | spawn age-0 character at setting origin + random relationship |
+| du % 80 | major material change: random source + implementation from `proc_words` |
+| tu % 100 | environment cycle: randomise temperature/density/hydration |
+| tu % 500 | spawn new random setting (offset from parent) + seed physical_environment |
+| always | `pg_notify('world_tick', json)` broadcast |
+
+- `pg_cron` job `'world-tick'` — schedule `'* * * * *'` — active ✅
+
+#### Smoke test (manual `SELECT public.world_tick()`)
+- `world_tick_state.duration_unit` 0 → 1 ✅
+- `settings.time_unit` 0 → 1 ✅
+
+#### Frontend (`app.js`)
+- Added `supabase.channel('world-tick')` subscribing to `postgres_changes` on `world_tick_state` UPDATE
+- On each tick: updates status bar (`du: N`), calls `updateGrid()` to reload entity positions (new spawned chars, moved entities)
+
+**Key decisions:**
+- `world_tick_state` UPDATE is the Realtime trigger — avoids needing `pg_net` for HTTP callbacks; Supabase Realtime picks up the row change automatically
+- `proc_words` is a stable seed table, not hardcoded in the function, so vocabulary can be extended via future migrations without changing the function
+- du (duration units, real-time ticks) vs tu (time_unit, story-time per setting) are tracked separately — du drives spawn/material schedules, tu drives environment/world-expansion schedules
+- Characters spawn only if a matching `grid_cells` row exists at the setting origin; silent no-op otherwise (safe until grid seeding is complete)
 
 ---
 
-### 🔼 Next: Milestone 9 — Natural Progression Loop
+### 🔼 Next: Milestone 10 — World Seeding UI + Grid Cell Bootstrap
 **Status:** Not started
 
-**Goal:** Implement the autonomous simulation backbone — the world advances on its own underneath player turns.
+**Goal:** Let the game actually show the world. Right now the grid canvas is mostly empty because `grid_cells` has no rows and characters have no positions seeded beyond fixtures. Milestone 10 wires it all together.
 
 **Scope:**
-- [ ] Supabase `pg_cron` job (or Edge Function cron) to tick world time periodically
-- [ ] Environment cycle every 100 time units
-- [ ] Material cycle: major change every 80u, minor every 3 durations
-- [ ] Population spawn: 1 age-0 character every 50 durations
-- [ ] 25 events per 500 time units spawn new random settings
-- [ ] Relationship randomization at spawn, adjusted by events
-- [ ] Broadcast world-tick to connected clients via Realtime
+- [ ] Seed `grid_cells` for genesis setting (e.g. 5×5×1 grid around origin)
+- [ ] Place genesis seed character (character_id=1) at origin grid cell
+- [ ] Add a `seed-world` Edge Function or SQL migration that bootstraps a fresh world on demand
+- [ ] Frontend: show setting name + `time_unit` / `duration_unit` in footer
+- [ ] Frontend: grid renderer draws setting boundary outline (isometric bounding box)
 
 ---
 
@@ -140,7 +94,9 @@ All DB-side and browser tests verified live: genesis setting, advance_turn trigg
 | Migration 006 | `006_auto_provision_players` — player provisioning trigger + backfill |
 | Migration 007 | `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions |
 | Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
+| Migration 009 | `009_natural_progression_loop` — world_tick_state, proc_words, world_tick(), pg_cron |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
+| pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1` required before any event insert |
 | Player A (dev) | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` — `dev@chronicle.local` |
@@ -149,8 +105,9 @@ All DB-side and browser tests verified live: genesis setting, advance_turn trigg
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 (enforced in Edge Function) |
 | Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated |
+| du vs tu | du = real-time ticks (global), tu = story-time per setting |
 | Client cooldown | 1 real minute (UX only) |
-| Default setting_id | `1` (hardcoded in `turn-manager.js` + `docs/index.html`) |
-| Auth storage | `sessionStorage` (survives refresh, not tab close) |
-| CDN | `unpkg.com/@supabase/supabase-js@2` (jsDelivr blocked by Tracking Prevention) |
+| Default setting_id | `1` (hardcoded in `turn-manager.js`) |
+| Auth storage | `sessionStorage` |
+| CDN | `unpkg.com/@supabase/supabase-js@2` |
 | Inspired by | [andredavisme/the-world](https://github.com/andredavisme/the-world) |
