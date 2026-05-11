@@ -66,24 +66,29 @@ See prior entry for full details. Summary:
 
 **Key lesson:** Never re-run a failed workflow to test a `deploy.yml` fix — re-runs snapshot the workflow at the original commit. Always push a new commit to `frontend/**` to trigger a fresh run.
 
+**Key lesson:** `docs/index.html` is the Vite **build output** — it is overwritten on every deploy. All frontend source changes must go into `frontend/src/` and `frontend/index.html`. Direct edits to `docs/` are ephemeral.
+
 ---
 
 ### ✅ Milestone 11 — Travel Action + Grid Movement
 **Date:** 2026-05-10 | **Status:** Complete
-**Commit:** `feat(m11): Travel action direction picker + grid movement`
+**Commits:** `fb75a46` (Vite source), `7f04134` (docs guard, superseded), `a7f889b` (initial, superseded)
 
 **What was done:**
-- `docs/index.html`: Travel button now opens a direction picker modal (N/S/E/W/Up/Down) instead of submitting immediately
-- `getAdjacentCellId(direction, characterId)`: queries actor's current open `entity_positions` row to get current (x,y,z), applies `DIR_DELTA` offset, looks up the resulting `grid_cells` row — returns `grid_cell_id` or a user-facing error string if no cell exists in that direction
-- On direction chosen: calls `submitAction('travel', { destination_grid_cell_id })` — Edge Function `handleTravel()` closes old position row, inserts new one at target cell (already implemented in M10 Edge Function)
-- Validation: direction buttons disabled while lookup is in-flight; error message shown in modal if target cell doesn't exist (e.g. boundary of the 7×7 grid)
-- `entity_positions` Realtime channel already wired — grid redraws automatically on position change
-- Player's `controlled_character_id` resolved once on login and passed to modal
+- `frontend/index.html`: direction picker modal markup + styles (N/S/E/W/Up/Down, 3×3 compass grid layout)
+- `frontend/src/app.js`: `getAdjacentCellId(direction, characterId)` — reads actor's open `entity_positions` row, applies `DIR_DELTA` offset, looks up target `grid_cells` row; returns `grid_cell_id` or user-facing error
+- Travel button opens modal instead of submitting immediately; on direction chosen calls `submitAction('travel', { destination_grid_cell_id })`
+- `gameInitialised` flag guards channel subscriptions against double-fire from `onAuthStateChange` (fires for both `INITIAL_SESSION` and `SIGNED_IN` on page load)
+- Validated live: char1 moved N from `(0,0,0)` → `(0,-1,0)`, grid redraws via Realtime
+
+**Bugfixes applied post-deploy:**
+- Migration `011_public_read_world_state`: added SELECT policies on `world_tick_state` and `settings` (were 406ing)
+- Migration `012_public_read_game_tables`: added SELECT policies on `entity_positions` and `grid_cells`; broadened `players` SELECT from own-only to all rows
 
 **Key decisions:**
-- Direction picker uses a 3×3 grid layout: N/S/E/W in compass cross, Up top-right, Down bottom-left
-- Cross-setting travel deferred to a future milestone (cell lookup scoped to existing `grid_cells` rows only)
-- No server-side direction encoding needed — `destination_grid_cell_id` is the canonical travel payload
+- Up/Down return `No cell exists to the up/down` — correct boundary behaviour; z≠0 cells only exist when structures/terrain warrant them
+- Cross-setting travel deferred to a future milestone
+- `destination_grid_cell_id` is the canonical travel payload — no server-side direction encoding needed
 
 ---
 
@@ -132,6 +137,20 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 
 ---
 
+### 💡 Idea 3 — Vertical z-Axis Physical Mechanics
+
+**Concept:** The `z` coordinate is currently flat (genesis grid is z=0 only). As the world gains structures and terrain, `z` becomes the axis for physical rules: gravity, buoyancy, flight, and elevation advantage.
+
+**Design considerations:**
+- **Structures** — buildings are stacked z-layers; `seed_setting_grid()` gains a `z_layers` parameter; cells only exist where structure/terrain warrants them (sparse, not a full 3D volume)
+- **Gravity** — characters without a supporting entity or surface at `z-1` fall each tick unless they have a `flight` or `buoyancy` attribute modifier; falling could deal damage via a conflict event
+- **Air travel** — `z=2+` cells accessible only to entities with `flight` attribute; used for birds, flying characters, projectiles, weather events
+- **Water** — `z=-1` and below as sub-surface cells; movement requires `buoyancy` or `breath` attributes; material decay accelerated; `world_tick()` could model flooding/drainage
+- **Height advantage in conflict** — occupying a higher z than a target entity applies an attribute modifier bonus to `introduce_conflict` / `resolve_conflict` actions
+- **Implementation path** — no schema changes needed (grid_cells already has z); z>0 cells seeded on structure spawn in `world_tick()`; Edge Function travel validation already respects cell existence; client direction picker Up/Down already wired and returns correct boundary error when no z cell exists
+
+---
+
 ## Quick Reference
 
 | Item | Value |
@@ -141,6 +160,7 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 | Live URL | [andredavisme.github.io/chronicle-worlds](https://andredavisme.github.io/chronicle-worlds/) |
 | Pages source | `gh-pages` branch, `/ (root)` |
 | Deploy trigger | any push to `frontend/**` on `main` |
+| Frontend source | `frontend/src/` + `frontend/index.html` — never edit `docs/` directly |
 | Migration 001 | `001_core_schema` — 10 base tables |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` |
@@ -151,6 +171,8 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 | Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
 | Migration 009 | `009_natural_progression_loop` — world_tick_state, proc_words, world_tick(), pg_cron |
 | Migration 010 | `010_world_seeding` — 7x7 grid_cells, entity_positions seed, seed_setting_grid(), REPLICA IDENTITY |
+| Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings |
+| Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
