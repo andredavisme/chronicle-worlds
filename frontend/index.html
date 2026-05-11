@@ -158,6 +158,63 @@
       }
       #travel-cancel:hover { border-color: #666; color: #aaa; }
 
+      /* ── Target Picker Modal ── */
+      #target-modal {
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.75);
+        align-items: center; justify-content: center;
+        z-index: 200;
+      }
+      #target-modal.open { display: flex; }
+      #target-modal-inner {
+        background: #111; border: 1px solid #4444aa;
+        padding: 20px; display: flex; flex-direction: column; gap: 12px;
+        min-width: 260px; max-width: 340px; width: 90vw;
+      }
+      #target-modal-inner h3 {
+        font-size: 0.8rem; color: #8888cc; letter-spacing: 1px; text-align: center;
+      }
+      #target-modal-subtitle {
+        font-size: 0.7rem; color: #555; text-align: center; margin-top: -6px;
+      }
+      #target-error {
+        font-size: 0.72rem; color: #cc4444; min-height: 1em; text-align: center;
+      }
+      #target-list {
+        display: flex; flex-direction: column; gap: 6px;
+        max-height: 220px; overflow-y: auto;
+      }
+      .target-btn {
+        background: #1a1a2a; border: 1px solid #333; color: #aaa;
+        padding: 9px 10px; cursor: pointer; font-family: inherit;
+        font-size: 0.78rem; text-align: left; transition: border-color 0.15s;
+        display: flex; justify-content: space-between; align-items: center;
+      }
+      .target-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .target-btn .char-stats { font-size: 0.68rem; color: #445; }
+      .target-btn:hover:not(:disabled) .char-stats { color: #778; }
+      #target-empty {
+        font-size: 0.75rem; color: #444; text-align: center; padding: 12px 0;
+      }
+      #target-amount-row {
+        display: none;
+        align-items: center; gap: 8px; font-size: 0.75rem; color: #666;
+      }
+      #target-amount-row.visible { display: flex; }
+      #target-amount-row label { white-space: nowrap; }
+      #target-amount {
+        background: #0a0a0f; border: 1px solid #333; color: #aaa;
+        padding: 4px 8px; font-family: inherit; font-size: 0.75rem;
+        width: 60px; text-align: center;
+      }
+      #target-cancel {
+        background: transparent; border: 1px solid #333; color: #555;
+        padding: 6px; cursor: pointer; font-family: inherit;
+        font-size: 0.75rem; text-align: center;
+      }
+      #target-cancel:hover { border-color: #666; color: #aaa; }
+
       @media (max-width: 767px) {
         body { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
         #mobile-panel-toggle { display: inline-block; margin-left: auto; }
@@ -244,6 +301,22 @@
           <button class="dir-btn empty" disabled></button>
         </div>
         <button id="travel-cancel">cancel</button>
+      </div>
+    </div>
+
+    <!-- Target Picker Modal -->
+    <div id="target-modal">
+      <div id="target-modal-inner">
+        <h3 id="target-modal-title">CHOOSE TARGET</h3>
+        <p id="target-modal-subtitle"></p>
+        <p id="target-error"></p>
+        <div id="target-amount-row">
+          <label for="target-amount">amount:</label>
+          <input type="number" id="target-amount" min="1" max="99" value="1" />
+        </div>
+        <div id="target-list"></div>
+        <p id="target-empty" style="display:none">no other characters in this cell</p>
+        <button id="target-cancel">cancel</button>
       </div>
     </div>
 

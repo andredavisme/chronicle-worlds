@@ -20,6 +20,16 @@ const charPosXYZEl    = document.getElementById('char-pos-xyz')
 const charSettingEl   = document.getElementById('char-setting-name')
 const charSettingDescEl = document.getElementById('char-setting-desc')
 
+// Target modal elements
+const targetModal        = document.getElementById('target-modal')
+const targetModalTitle   = document.getElementById('target-modal-title')
+const targetModalSubtitle = document.getElementById('target-modal-subtitle')
+const targetError        = document.getElementById('target-error')
+const targetList         = document.getElementById('target-list')
+const targetEmpty        = document.getElementById('target-empty')
+const targetAmountRow    = document.getElementById('target-amount-row')
+const targetAmountInput  = document.getElementById('target-amount')
+
 // Guard: onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on page load.
 let gameInitialised = false
 
@@ -71,7 +81,6 @@ async function loadCharPosition(characterId) {
   if (!gc) return
   charPosXYZEl.textContent = `(${gc.x}, ${gc.y}, ${gc.z})`
 
-  // Resolve setting name from entity_copies (Root reality)
   const { data: copy } = await supabase
     .from('entity_copies')
     .select('name, description')
@@ -84,6 +93,124 @@ async function loadCharPosition(characterId) {
   if (charSettingDescEl) charSettingDescEl.textContent = copy?.description ?? ''
 }
 
+// ─── Get current grid_cell_id for a character ───────────────────
+async function getCharacterCellId(characterId) {
+  const { data, error } = await supabase
+    .from('entity_positions')
+    .select('grid_cell_id')
+    .eq('entity_type', 'character')
+    .eq('entity_id', characterId)
+    .is('timestamp_end', null)
+    .single()
+  if (error || !data) return null
+  return data.grid_cell_id
+}
+
+// ─── Get other characters sharing the same grid cell ────────────
+// Returns array of { character_id, health, wealth, inspiration }
+async function getColocatedCharacters(actorCharacterId) {
+  const cellId = await getCharacterCellId(actorCharacterId)
+  if (!cellId) return []
+
+  // All characters currently in the same cell
+  const { data: positions, error } = await supabase
+    .from('entity_positions')
+    .select('entity_id')
+    .eq('entity_type', 'character')
+    .eq('grid_cell_id', cellId)
+    .is('timestamp_end', null)
+    .neq('entity_id', actorCharacterId)
+
+  if (error || !positions?.length) return []
+
+  const ids = positions.map(p => p.entity_id)
+
+  const { data: chars, error: charErr } = await supabase
+    .from('characters')
+    .select('character_id, health, wealth, inspiration')
+    .in('character_id', ids)
+
+  if (charErr || !chars) return []
+  return chars
+}
+
+// ─── Target modal ────────────────────────────────────────────────
+
+// Actions that require a target character in the same cell
+const TARGET_ACTIONS = new Set(['introduce_conflict', 'resolve_conflict', 'exchange_material'])
+
+const ACTION_LABELS = {
+  introduce_conflict:  { title: 'INTRODUCE CONFLICT', subtitle: 'choose a target character' },
+  resolve_conflict:    { title: 'RESOLVE CONFLICT',   subtitle: 'choose a character to resolve with' },
+  exchange_material:   { title: 'EXCHANGE MATERIAL',  subtitle: 'choose a character to trade with' },
+}
+
+let targetPendingAction   = null
+let targetPendingCharId   = null
+let targetResolve         = null  // Promise resolver so the modal result flows back to the click handler
+
+// Opens the target picker; returns { target_character_id, wealth_amount? } or null if cancelled.
+function openTargetModal(action, actorCharacterId, colocated) {
+  return new Promise((resolve) => {
+    targetResolve = resolve
+    targetPendingAction  = action
+    targetPendingCharId  = actorCharacterId
+
+    const labels = ACTION_LABELS[action] ?? { title: 'CHOOSE TARGET', subtitle: '' }
+    targetModalTitle.textContent    = labels.title
+    targetModalSubtitle.textContent = labels.subtitle
+    targetError.textContent = ''
+
+    // Show/hide amount input for exchange_material only
+    if (action === 'exchange_material') {
+      targetAmountRow.classList.add('visible')
+      targetAmountInput.value = 1
+    } else {
+      targetAmountRow.classList.remove('visible')
+    }
+
+    // Populate target list
+    targetList.innerHTML = ''
+    if (!colocated.length) {
+      targetEmpty.style.display = 'block'
+    } else {
+      targetEmpty.style.display = 'none'
+      colocated.forEach(char => {
+        const btn = document.createElement('button')
+        btn.className = 'target-btn'
+        btn.innerHTML = `
+          <span>char #${char.character_id}</span>
+          <span class="char-stats">hp:${char.health ?? '?'} · w:${char.wealth ?? '?'} · ins:${char.inspiration ?? '?'}</span>
+        `
+        btn.addEventListener('click', () => {
+          const amount = action === 'exchange_material'
+            ? Math.max(1, parseInt(targetAmountInput.value, 10) || 1)
+            : undefined
+          closeTargetModal()
+          resolve({ target_character_id: char.character_id, wealth_amount: amount })
+        })
+        targetList.appendChild(btn)
+      })
+    }
+
+    targetModal.classList.add('open')
+  })
+}
+
+function closeTargetModal() {
+  targetModal.classList.remove('open')
+  targetError.textContent = ''
+  // If closed without selecting, resolve with null
+  if (targetResolve) {
+    const r = targetResolve
+    targetResolve = null
+    r(null)
+  }
+}
+
+document.getElementById('target-cancel').addEventListener('click', closeTargetModal)
+targetModal.addEventListener('click', e => { if (e.target === targetModal) closeTargetModal() })
+
 // ─── Direction picker ───────────────────────────────────────────────
 const DIR_DELTA = {
   north: { dx:  0, dy: -1, dz:  0 },
@@ -94,8 +221,6 @@ const DIR_DELTA = {
   down:  { dx:  0, dy:  0, dz: -1 },
 }
 
-// Resolves (or discovers) the adjacent cell by calling the discover-cell edge function.
-// Returns { cellId, spawned, copyName, copyDescription, error }
 async function getAdjacentCellId(direction, characterId) {
   const { data: pos, error: posErr } = await supabase
     .from('entity_positions')
@@ -128,7 +253,6 @@ async function getAdjacentCellId(direction, characterId) {
   }
 }
 
-// All 6 directions are always traversable — undiscovered cells are spawned on demand.
 async function prevalidateDirections() {
   document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
     btn.classList.remove('no-cell')
@@ -200,7 +324,6 @@ async function showGame(user) {
 
   initGridRenderer(canvas)
 
-  // Resolve controlled character before loading positions (needed for highlight)
   let characterId = null
   const { data: playerRow } = await supabase
     .from('players')
@@ -232,18 +355,64 @@ async function showGame(user) {
   document.querySelectorAll('.action-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action
+
+      // ── Travel: open direction picker ──
       if (action === 'travel') {
         if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
         await openTravelModal(characterId)
         return
       }
-      setActionsDisabled(true)
-      statusEl.textContent = `submitting ${action}…`
-      try {
-        await submitAction(action)
+
+      // ── exchange_information: self-submit, no target needed ──
+      if (action === 'exchange_information') {
+        setActionsDisabled(true)
+        statusEl.textContent = 'exchanging information…'
+        try {
+          await submitAction(action)
+          statusEl.textContent = `connected as ${user.email}`
+        } catch (e) { statusEl.textContent = `error: ${e.message}` }
+        finally { setActionsDisabled(false) }
+        return
+      }
+
+      // ── Actions requiring a target character in the same cell ──
+      if (TARGET_ACTIONS.has(action)) {
+        if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
+
+        setActionsDisabled(true)
+        statusEl.textContent = 'looking for characters in your cell…'
+
+        let colocated
+        try {
+          colocated = await getColocatedCharacters(characterId)
+        } catch (e) {
+          statusEl.textContent = `error: ${e.message}`
+          setActionsDisabled(false)
+          return
+        }
+
+        // Re-enable buttons so the modal is usable (modal is its own flow)
+        setActionsDisabled(false)
         statusEl.textContent = `connected as ${user.email}`
-      } catch (e) { statusEl.textContent = `error: ${e.message}` }
-      finally { setActionsDisabled(false) }
+
+        const result = await openTargetModal(action, characterId, colocated)
+
+        // null = cancelled
+        if (!result) return
+
+        const { target_character_id, wealth_amount } = result
+        const details = { target_character_id }
+        if (wealth_amount !== undefined) details.wealth_amount = wealth_amount
+
+        setActionsDisabled(true)
+        statusEl.textContent = `submitting ${action} on char #${target_character_id}…`
+        try {
+          await submitAction(action, details)
+          statusEl.textContent = `connected as ${user.email}`
+        } catch (e) { statusEl.textContent = `error: ${e.message}` }
+        finally { setActionsDisabled(false) }
+        return
+      }
     })
   })
 
