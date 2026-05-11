@@ -53,7 +53,7 @@ See prior entry for full details. Summary:
 **Date:** 2026-05-10 | **Status:** Complete
 **Commits:** `de6b193` (workflow fix) → `69a09d4` (permissions) → `fb997a3` (trigger) — **Deploy #29 ✅ green**
 
-**Problem:** `peaceiris/actions-gh-pages@v4` was configured with `publish_branch: main`, which GitHub prohibits (can’t deploy from main to main). Re-running old runs always used the old workflow snapshot — didn’t pick up fixes.
+**Problem:** `peaceiris/actions-gh-pages@v4` was configured with `publish_branch: main`, which GitHub prohibits (can't deploy from main to main). Re-running old runs always used the old workflow snapshot — didn't pick up fixes.
 
 **Fix sequence:**
 1. Changed `publish_branch: main` → `publish_branch: gh-pages` in `deploy.yml`
@@ -71,7 +71,7 @@ See prior entry for full details. Summary:
 ### 🔼 Next: Milestone 11 — Travel Action + Grid Movement
 **Status:** Not started
 
-**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn’t update `entity_positions`.
+**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn't update `entity_positions`.
 
 **Scope:**
 - [ ] Edge Function `resolve-turn`: on `travel` action, close current `entity_positions` row (`timestamp_end = now()`), insert new row at target cell
@@ -79,6 +79,38 @@ See prior entry for full details. Summary:
 - [ ] Frontend: Travel button opens a direction picker before submitting
 - [ ] Validate: target cell must exist, have capacity, be in same setting (cross-setting travel = future milestone)
 - [ ] `entity_positions` change fires Realtime → grid redraws automatically (already wired in M10)
+
+---
+
+## Developer Notes — Future Ideas
+
+Unscheduled design ideas to revisit when relevant milestones are reached. Not committed to any implementation timeline.
+
+---
+
+### 💡 Idea 1 — Attribute Pool on Entity Destruction
+
+**Concept:** When an entity (character or material) is destroyed — i.e., its `health` or `durability` reaches `0` — all of its current `attribute_modifiers` rows are not deleted but instead moved into a shared global pool. Newly created entities (spawned via natural progression or player action) draw from this pool to seed their initial attributes, creating a form of ecological inheritance across the world's history.
+
+**Design considerations:**
+- New table (e.g., `attribute_pool`) or a flag column on `attribute_modifiers` (`pooled BOOLEAN`) to mark released attributes
+- `world_tick()` spawn logic would query the pool and apply a random or weighted subset to new entities
+- Pool could be scoped per `setting_id` (local inheritance) or global (world-wide inheritance) — local is more thematically interesting
+- Destruction trigger: extend `world_tick()` or add a DB trigger on `characters.health` and `materials.durability` to fire on reaching `0`
+- Chronicle entry should record destruction events so the lineage of attributes is traceable
+
+---
+
+### 💡 Idea 2 — Age-Based Attribute Modification
+
+**Concept:** Entities with an `age` attribute (currently characters) have their attributes automatically modified as age increases. Aging is already tracked per tick in `world_tick()` — this extends that loop to apply lifecycle modifiers at defined age thresholds.
+
+**Design considerations:**
+- Define age bracket thresholds (e.g., youth / prime / elder) as constants or a config table (e.g., `age_brackets`)
+- On each tick, check if a character's age crosses a bracket boundary; if so, insert/update rows in `attribute_modifiers` for that entity
+- Modifier values can be seeded procedurally (using `proc_words` logic or a numeric range) to keep each character's aging curve unique
+- Could interact with Idea 1: entities that die young vs. old contribute differently weighted attribute pools
+- Consider whether age modifiers are permanent (accumulating) or replaced per bracket (simpler, less drift)
 
 ---
 
