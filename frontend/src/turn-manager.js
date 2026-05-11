@@ -1,19 +1,20 @@
 import { supabase } from './supabase-client.js'
 
 const COOLDOWN_MS = 60_000 // 1 real minute — UX only, not server-enforced
-const DEFAULT_SETTING_ID = 1 // genesis setting; update if world has multiple settings
+const DEFAULT_SETTING_ID = 1
 
 let cooldownEnd = 0
 let cooldownTimer = null
 let onCooldownUpdate = null // callback(secondsRemaining)
 let onTurnResult = null    // callback(result)
+let onDisabledChange = null // callback(disabled: boolean)
 
-export function initTurnManager({ onCooldown, onResult }) {
-  onCooldownUpdate = onCooldown
-  onTurnResult = onResult
+export function initTurnManager({ onCooldown, onResult, onDisabled }) {
+  onCooldownUpdate  = onCooldown
+  onTurnResult      = onResult
+  onDisabledChange  = onDisabled ?? null
 }
 
-// Submit an action to the resolve-turn Edge Function
 export async function submitAction(action, details = {}) {
   const now = Date.now()
   if (now < cooldownEnd) {
@@ -32,9 +33,9 @@ export async function submitAction(action, details = {}) {
       action,
       player_id: session.user.id,
       details: {
-        setting_id: DEFAULT_SETTING_ID, // required — events.setting_id NOT NULL
+        setting_id: DEFAULT_SETTING_ID,
         submit_timestamp,
-        sequence_index: Math.floor(Math.random() * 1_000_000), // tiebreaker
+        sequence_index: Math.floor(Math.random() * 1_000_000),
         ...details,
       },
     },
@@ -52,12 +53,14 @@ export async function submitAction(action, details = {}) {
 
 function startCooldown() {
   cooldownEnd = Date.now() + COOLDOWN_MS
+  onDisabledChange?.(true)
   clearInterval(cooldownTimer)
   cooldownTimer = setInterval(() => {
     const remaining = Math.ceil((cooldownEnd - Date.now()) / 1000)
     if (remaining <= 0) {
       clearInterval(cooldownTimer)
       onCooldownUpdate?.(0)
+      onDisabledChange?.(false)
     } else {
       onCooldownUpdate?.(remaining)
     }
@@ -65,7 +68,6 @@ function startCooldown() {
 }
 
 export function resetCooldown() {
-  // Called by Realtime broadcast on turn_resolved
   startCooldown()
 }
 
