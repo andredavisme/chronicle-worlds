@@ -86,6 +86,46 @@
         border-color: #1e1e1e;
       }
 
+      /* ── Mode toggle ── */
+      #mode-toggle-row {
+        display: flex; gap: 0; border: 1px solid #2a2a4a; overflow: hidden;
+      }
+      .mode-btn {
+        flex: 1; background: #111; border: none; color: #555;
+        padding: 5px 0; cursor: pointer; font-family: inherit;
+        font-size: 0.72rem; letter-spacing: 1px; transition: background 0.15s, color 0.15s;
+      }
+      .mode-btn.active { background: #1a1a4a; color: #aaaaee; }
+      .mode-btn:hover:not(.active) { background: #141428; color: #888; }
+
+      /* ── Command panel ── */
+      #cmd-panel { display: none; flex-direction: column; gap: 6px; }
+      #cmd-panel.visible { display: flex; }
+      #cmd-history {
+        background: #080810; border: 1px solid #1a1a2a;
+        padding: 8px; font-size: 0.72rem; color: #556; line-height: 1.7;
+        min-height: 100px; max-height: 180px; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 2px;
+      }
+      .cmd-line { color: #446644; }
+      .cmd-line.echo { color: #8888cc; }
+      .cmd-line.err { color: #cc4444; }
+      .cmd-line.info { color: #666; }
+      #cmd-input-row { display: flex; gap: 6px; }
+      #cmd-input {
+        flex: 1; background: #0a0a14; border: 1px solid #2a2a4a; color: #aaaaee;
+        padding: 6px 8px; font-family: inherit; font-size: 0.8rem;
+        outline: none;
+      }
+      #cmd-input:focus { border-color: #4444aa; }
+      #cmd-submit {
+        background: #1a1a3a; border: 1px solid #3a3a6a; color: #8888cc;
+        padding: 6px 10px; cursor: pointer; font-family: inherit;
+        font-size: 0.75rem; transition: background 0.15s;
+      }
+      #cmd-submit:hover:not(:disabled) { background: #2a2a5a; }
+      #cmd-submit:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+
       /* ── Character position panel ── */
       #char-position-panel {
         font-size: 0.72rem;
@@ -244,7 +284,7 @@
         footer { padding: 6px 12px; gap: 10px; font-size: 0.65rem; }
       }
     </style>
-    <script type="module" crossorigin src="/chronicle-worlds/assets/index-o7Naw5lj.js"></script>
+    <script type="module" crossorigin src="/chronicle-worlds/assets/index-DphAKtLB.js"></script>
   </head>
   <body>
     <header>
@@ -277,6 +317,14 @@
 
       <div>
         <h2>ACTIONS</h2>
+
+        <!-- Mode toggle -->
+        <div id="mode-toggle-row" style="margin-bottom:8px">
+          <button class="mode-btn active" id="mode-btn-buttons">BUTTONS</button>
+          <button class="mode-btn" id="mode-btn-text">TEXT</button>
+        </div>
+
+        <!-- Button mode -->
         <div id="action-panel">
           <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
           <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
@@ -284,7 +332,17 @@
           <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
           <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
         </div>
+
+        <!-- Text command mode -->
+        <div id="cmd-panel">
+          <div id="cmd-history"><span class="cmd-line info">type "help" for commands</span></div>
+          <div id="cmd-input-row">
+            <input type="text" id="cmd-input" placeholder="&gt; enter command" autocomplete="off" spellcheck="false" />
+            <button id="cmd-submit">&crarr;</button>
+          </div>
+        </div>
       </div>
+
       <div>
         <h2>CHRONICLE</h2>
         <div id="chronicle-list"><span style="color:#333">loading...</span></div>
