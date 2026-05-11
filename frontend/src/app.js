@@ -82,6 +82,8 @@ const DIR_DELTA = {
   down:  { dx:  0, dy:  0, dz: -1 },
 }
 
+// Resolves (or discovers) the adjacent cell by calling the discover-cell edge function.
+// Returns { cellId, spawned, error }
 async function getAdjacentCellId(direction, characterId) {
   const { data: pos, error: posErr } = await supabase
     .from('entity_positions')
@@ -90,39 +92,30 @@ async function getAdjacentCellId(direction, characterId) {
     .eq('entity_id', characterId)
     .is('timestamp_end', null)
     .single()
-  if (posErr || !pos) return { cellId: null, error: 'Could not find your current position.' }
+  if (posErr || !pos) return { cellId: null, spawned: false, error: 'Could not find your current position.' }
+
   const { dx, dy, dz } = DIR_DELTA[direction]
   const tx = (pos.grid_cells?.x ?? 0) + dx
   const ty = (pos.grid_cells?.y ?? 0) + dy
   const tz = (pos.grid_cells?.z ?? 0) + dz
-  const { data: cell, error: cellErr } = await supabase
-    .from('grid_cells')
-    .select('grid_cell_id')
-    .eq('x', tx).eq('y', ty).eq('z', tz)
-    .single()
-  if (cellErr || !cell) return { cellId: null, error: `No cell exists to the ${direction}.` }
-  return { cellId: cell.grid_cell_id, error: null }
+
+  const { data, error } = await supabase.functions.invoke('discover-cell', {
+    body: { x: tx, y: ty, z: tz, from_cell_id: pos.grid_cell_id }
+  })
+
+  if (error || !data?.grid_cell_id) {
+    return { cellId: null, spawned: false, error: `Could not resolve cell to the ${direction}.` }
+  }
+
+  return { cellId: data.grid_cell_id, spawned: data.spawned ?? false, error: null }
 }
 
-// Pre-validate all 6 directions and grey out impossible ones
-async function prevalidateDirections(characterId) {
-  const checks = await Promise.all(
-    Object.keys(DIR_DELTA).map(async (dir) => {
-      const { cellId } = await getAdjacentCellId(dir, characterId)
-      return { dir, exists: !!cellId }
-    })
-  )
-  for (const { dir, exists } of checks) {
-    const btn = document.querySelector(`.dir-btn[data-dir="${dir}"]`)
-    if (!btn) continue
-    if (exists) {
-      btn.classList.remove('no-cell')
-      btn.disabled = false
-    } else {
-      btn.classList.add('no-cell')
-      btn.disabled = true
-    }
-  }
+// All 6 directions are always traversable — undiscovered cells are spawned on demand.
+async function prevalidateDirections() {
+  document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
+    btn.classList.remove('no-cell')
+    btn.disabled = false
+  })
 }
 
 let travelCharacterId = null
@@ -130,13 +123,8 @@ let travelCharacterId = null
 async function openTravelModal(characterId) {
   travelCharacterId = characterId
   travelError.textContent = ''
-  // Reset all dir buttons to loading state before pre-validation
-  document.querySelectorAll('.dir-btn[data-dir]').forEach(b => {
-    b.disabled = true
-    b.classList.remove('no-cell')
-  })
   travelModal.classList.add('open')
-  await prevalidateDirections(characterId)
+  await prevalidateDirections()
 }
 
 function closeTravelModal() {
@@ -154,13 +142,16 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
     const direction = btn.dataset.dir
     travelError.textContent = ''
     document.querySelectorAll('.dir-btn').forEach(b => b.disabled = true)
-    const { cellId, error } = await getAdjacentCellId(direction, travelCharacterId)
+
+    const { cellId, spawned, error } = await getAdjacentCellId(direction, travelCharacterId)
     if (error || !cellId) {
       travelError.textContent = error || 'No cell in that direction.'
-      // Re-run pre-validation to restore correct state
-      await prevalidateDirections(travelCharacterId)
+      await prevalidateDirections()
       return
     }
+
+    if (spawned) statusEl.textContent = `discovering new cell to the ${direction}…`
+
     closeTravelModal()
     setActionsDisabled(true)
     statusEl.textContent = `travelling ${direction}…`
