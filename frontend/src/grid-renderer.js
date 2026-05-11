@@ -3,9 +3,15 @@ import { supabase } from './supabase-client.js'
 let canvas, ctx
 let entities   = [] // { entity_type, entity_id, x, y, z, effective_size }
 let settingBounds = [] // { min_x, max_x, min_y, max_y, z, setting_id }
+let localCharacterId = null // the current player's character — highlighted on canvas
 
 const BASE_TILE_W = 48
 const MIN_TILE_W  = 20
+
+export function setLocalCharacterId(id) {
+  localCharacterId = id
+  render()
+}
 
 function getTileSize() {
   if (!canvas) return { tw: BASE_TILE_W, th: BASE_TILE_W / 2 }
@@ -75,7 +81,6 @@ export function updateGrid(_payload) {
 }
 
 function drawSettingBoundary(cx, cy, bound, tw, th) {
-  // Draw the four corner-to-corner edges of the isometric bounding box
   const corners = [
     isoProject(bound.min_x - 0.5, bound.min_y - 0.5, bound.z, tw, th),
     isoProject(bound.max_x + 0.5, bound.min_y - 0.5, bound.z, tw, th),
@@ -92,13 +97,33 @@ function drawSettingBoundary(cx, cy, bound, tw, th) {
   ctx.lineWidth = 1
   ctx.stroke()
 
-  // Label
   const top = corners.reduce((a, b) => a.sy < b.sy ? a : b)
   ctx.fillStyle = 'rgba(80, 80, 160, 0.5)'
   ctx.font = '9px Courier New'
   ctx.textAlign = 'center'
   ctx.fillText(`S${bound.setting_id}`, cx + top.sx, cy + top.sy - 4)
   ctx.textAlign = 'left'
+}
+
+function drawLocalHighlight(cx, cy, sx, sy, r) {
+  // Outer glow ring
+  const gradient = ctx.createRadialGradient(
+    cx + sx, cy + sy, r * 0.8,
+    cx + sx, cy + sy, r * 2.2
+  )
+  gradient.addColorStop(0, 'rgba(100, 220, 100, 0.30)')
+  gradient.addColorStop(1, 'rgba(100, 220, 100, 0.00)')
+  ctx.beginPath()
+  ctx.ellipse(cx + sx, cy + sy, r * 2.2, r * 2.2 * 0.55, 0, 0, Math.PI * 2)
+  ctx.fillStyle = gradient
+  ctx.fill()
+
+  // Crisp ring
+  ctx.beginPath()
+  ctx.ellipse(cx + sx, cy + sy, r * 1.65, r * 1.65 * 0.55, 0, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(100, 220, 100, 0.7)'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
 }
 
 function render() {
@@ -118,18 +143,23 @@ function render() {
   for (const e of entities) {
     const { sx, sy } = isoProject(e.x, e.y, e.z, tw, th)
     const r = Math.max(3, e.effective_size * (tw / 8))
+    const isLocal = e.entity_type === 'character' && e.entity_id === localCharacterId
+
+    // Draw highlight glow behind local character
+    if (isLocal) drawLocalHighlight(cx, cy, sx, sy, r)
 
     ctx.beginPath()
     ctx.ellipse(cx + sx, cy + sy, r, r * 0.55, 0, 0, Math.PI * 2)
 
-    if (e.entity_type === 'character')    ctx.fillStyle = '#6688ff'
+    if (isLocal)                          ctx.fillStyle = '#44ee88'
+    else if (e.entity_type === 'character')    ctx.fillStyle = '#6688ff'
     else if (e.entity_type === 'setting') ctx.fillStyle = '#224422'
     else if (e.entity_type === 'material')ctx.fillStyle = '#aa8844'
     else                                  ctx.fillStyle = '#444466'
     ctx.fill()
 
     if (tw >= 28) {
-      ctx.fillStyle = '#88aaff'
+      ctx.fillStyle = isLocal ? '#aaffcc' : '#88aaff'
       ctx.font = `${Math.max(8, tw / 5)}px Courier New`
       ctx.fillText(`${e.entity_type[0].toUpperCase()}${e.entity_id}`, cx + sx + r + 2, cy + sy + 3)
     }

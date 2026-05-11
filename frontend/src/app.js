@@ -1,6 +1,6 @@
 import { supabase, signIn, signUp, onAuthChange } from './supabase-client.js'
 import { initTurnManager, submitAction, resetCooldown } from './turn-manager.js'
-import { initGridRenderer, loadEntityPositions, updateGrid } from './grid-renderer.js'
+import { initGridRenderer, loadEntityPositions, updateGrid, setLocalCharacterId } from './grid-renderer.js'
 import { loadChronicle, appendChronicleEntry } from './chronicle-reader.js'
 
 const authPanel       = document.getElementById('auth-panel')
@@ -16,9 +16,10 @@ const chronicleListEl = document.getElementById('chronicle-list')
 const canvas          = document.getElementById('grid-canvas')
 const travelModal     = document.getElementById('travel-modal')
 const travelError     = document.getElementById('travel-error')
+const charPosXYZEl    = document.getElementById('char-pos-xyz')
+const charSettingEl   = document.getElementById('char-setting-name')
 
 // Guard: onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on page load.
-// Only run channel subscriptions + heavy init once per page load.
 let gameInitialised = false
 
 // ─── Auth UI ────────────────────────────────────────────────────────
@@ -54,6 +55,23 @@ async function loadWorldTime() {
   if (tick && setting) worldTimeEl.textContent = `tu: ${setting.time_unit} · du: ${tick.duration_unit}`
 }
 
+// ─── Character position UI ──────────────────────────────────────
+async function loadCharPosition(characterId) {
+  if (!characterId) return
+  const { data, error } = await supabase
+    .from('entity_positions')
+    .select('grid_cells(x, y, z, setting_id, settings(name))')
+    .eq('entity_type', 'character')
+    .eq('entity_id', characterId)
+    .is('timestamp_end', null)
+    .single()
+  if (error || !data) return
+  const gc = data.grid_cells
+  if (!gc) return
+  charPosXYZEl.textContent = `(${gc.x}, ${gc.y}, ${gc.z})`
+  charSettingEl.textContent = gc.settings?.name ?? `S${gc.setting_id}`
+}
+
 // ─── Direction picker ───────────────────────────────────────────────
 const DIR_DELTA = {
   north: { dx:  0, dy: -1, dz:  0 },
@@ -86,13 +104,39 @@ async function getAdjacentCellId(direction, characterId) {
   return { cellId: cell.grid_cell_id, error: null }
 }
 
+// Pre-validate all 6 directions and grey out impossible ones
+async function prevalidateDirections(characterId) {
+  const checks = await Promise.all(
+    Object.keys(DIR_DELTA).map(async (dir) => {
+      const { cellId } = await getAdjacentCellId(dir, characterId)
+      return { dir, exists: !!cellId }
+    })
+  )
+  for (const { dir, exists } of checks) {
+    const btn = document.querySelector(`.dir-btn[data-dir="${dir}"]`)
+    if (!btn) continue
+    if (exists) {
+      btn.classList.remove('no-cell')
+      btn.disabled = false
+    } else {
+      btn.classList.add('no-cell')
+      btn.disabled = true
+    }
+  }
+}
+
 let travelCharacterId = null
 
-function openTravelModal(characterId) {
+async function openTravelModal(characterId) {
   travelCharacterId = characterId
   travelError.textContent = ''
-  document.querySelectorAll('.dir-btn[data-dir]').forEach(b => b.disabled = false)
+  // Reset all dir buttons to loading state before pre-validation
+  document.querySelectorAll('.dir-btn[data-dir]').forEach(b => {
+    b.disabled = true
+    b.classList.remove('no-cell')
+  })
   travelModal.classList.add('open')
+  await prevalidateDirections(characterId)
 }
 
 function closeTravelModal() {
@@ -106,13 +150,15 @@ travelModal.addEventListener('click', e => { if (e.target === travelModal) close
 
 document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
   btn.addEventListener('click', async () => {
+    if (btn.disabled || btn.classList.contains('no-cell')) return
     const direction = btn.dataset.dir
     travelError.textContent = ''
     document.querySelectorAll('.dir-btn').forEach(b => b.disabled = true)
     const { cellId, error } = await getAdjacentCellId(direction, travelCharacterId)
     if (error || !cellId) {
       travelError.textContent = error || 'No cell in that direction.'
-      document.querySelectorAll('.dir-btn[data-dir]').forEach(b => b.disabled = false)
+      // Re-run pre-validation to restore correct state
+      await prevalidateDirections(travelCharacterId)
       return
     }
     closeTravelModal()
@@ -130,30 +176,33 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
 
 // ─── showGame ─────────────────────────────────────────────────────
 async function showGame(user) {
-  // Always update visible UI (handles token refresh events, tab restore, etc.)
   authPanel.style.display  = 'none'
   gameArea.style.display   = 'block'
   sidebar.style.display    = 'flex'
   statusEl.textContent     = `connected as ${user.email}`
   playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
 
-  // Only initialise channels + renderer once per page load
   if (gameInitialised) return
   gameInitialised = true
 
   initGridRenderer(canvas)
-  await loadEntityPositions()
-  await loadChronicle(chronicleListEl)
-  await loadWorldTime()
 
-  // Resolve controlled character for travel
+  // Resolve controlled character before loading positions (needed for highlight)
   let characterId = null
   const { data: playerRow } = await supabase
     .from('players')
     .select('controlled_character_id')
     .eq('player_id', user.id)
     .single()
-  if (playerRow) characterId = playerRow.controlled_character_id
+  if (playerRow) {
+    characterId = playerRow.controlled_character_id
+    setLocalCharacterId(characterId)
+  }
+
+  await loadEntityPositions()
+  await loadChronicle(chronicleListEl)
+  await loadWorldTime()
+  await loadCharPosition(characterId)
 
   initTurnManager({
     onCooldown: (sec) => { cooldownEl.textContent = sec > 0 ? `cooldown: ${sec}s` : '' },
@@ -172,7 +221,7 @@ async function showGame(user) {
       const action = btn.dataset.action
       if (action === 'travel') {
         if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
-        openTravelModal(characterId)
+        await openTravelModal(characterId)
         return
       }
       setActionsDisabled(true)
@@ -190,6 +239,7 @@ async function showGame(user) {
       loadEntityPositions()
       resetCooldown()
       loadChronicle(chronicleListEl)
+      loadCharPosition(characterId)
       branchInfoEl.textContent = `branch: ${(payload.branch_id ?? 0) === 0 ? 'root' : payload.branch_id}`
     })
     .subscribe()
@@ -206,7 +256,10 @@ async function showGame(user) {
   supabase.channel('entity-positions')
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'entity_positions' },
-        () => { loadEntityPositions() })
+        () => {
+          loadEntityPositions()
+          loadCharPosition(characterId)
+        })
     .subscribe()
 }
 
@@ -216,6 +269,8 @@ function showAuth() {
   sidebar.style.display   = 'none'
   statusEl.textContent    = 'not connected'
   playerInfoEl.textContent = '—'
+  charPosXYZEl.textContent = '—'
+  charSettingEl.textContent = '—'
 }
 
 function setActionsDisabled(disabled) {
