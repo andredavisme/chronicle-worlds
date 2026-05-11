@@ -210,21 +210,45 @@ See prior entry for full details. Summary:
 - Truth `settings` rows remain nameless; all player-facing naming lives in `entity_copies`
 - `local_attributes` reserved for future biome metadata (for example `setting_type`)
 
-**Remaining follow-up:**
-- Grid renderer colour-coding by `setting_id` still pending
+---
+
+### ✅ Milestone 13c — Grid Colour-Coding by Setting
+**Date:** 2026-05-11 | **Status:** Complete
+**Commit:** `939a6b03`
+
+**What was done:**
+- Added `SETTING_PALETTE`: 10 evenly-spaced HSL hues, stable per `setting_id mod 10`
+- `settingColour(id)` helper returns `{ fill, stroke, label }` HSLA variants at low opacity
+- `loadEntityPositions()` now queries **all** `grid_cells` rows (not just those with entities) into a new `gridCells[]` state array
+- `drawGridTile()`: renders each cell as an isometric diamond — `fill` at 0.18 opacity, `stroke` at 0.45 opacity
+- `render()` layer order: tiles → boundary outlines → entities
+- `drawSettingBoundary()` now uses the per-setting stroke colour instead of the hardcoded `rgba(80,80,160)`
+- Setting label (`S1`, `S2`…) tinted to match its boundary colour
+- Empty-world fallback message now only shown when both `entities` and `gridCells` are empty
+
+**Key decisions:**
+- Tile fill opacity kept at 0.18 — legible tint without obscuring entity markers or boundary lines
+- Boundary `lineWidth` bumped from 1 → 1.5 to stay readable over the tile fill
+- Palette cycles every 10 settings; neighbouring settings will rarely share a hue in practice given natural spawn spacing
+- `settingBounds` now derived from `gridCells[]` instead of entity_positions join, so empty settings still render a boundary
 
 ---
 
-### 🔼 Next: Milestone 13c — Grid Colour-Coding by Setting
-**Status:** Not started
+## 🔼 Next Milestone Candidates
 
-**Goal:** Make setting boundaries legible at a glance by tinting rendered grid cells according to `setting_id`, while preserving entity visibility and boundary-box readability.
+Choose one to tackle next:
 
-**Scope:**
-- [ ] `grid-renderer.js`: assign stable colour palette by `setting_id`
-- [ ] Keep contrast high enough for character/material markers and current-cell highlight
-- [ ] Preserve boundary outlines so setting regions remain readable in dense maps
-- [ ] Validate on mobile and desktop after GitHub Pages deploy
+### Option A — Text Command Mode (Idea 4)
+Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
+
+### Option B — Remaining Actions (exchange_info, introduce_conflict, resolve_conflict, exchange_material)
+The 4 non-travel actions are wired in the Edge Function but have no target-selection UI. Each needs a character/entity picker before the submit call. Simplest form: submit against the nearest character in the same grid cell.
+
+### Option C — Age-Based Attribute Modification (Idea 2)
+Insert/update `attribute_modifiers` when a character's age crosses youth/prime/elder brackets in `world_tick()`. Bracket thresholds as constants. Permanent accumulating modifiers.
+
+### Option D — Attribute Pool on Entity Destruction (Idea 1)
+Destruction trigger on `characters.health = 0` / `materials.durability = 0`. Moves `attribute_modifiers` rows into a `pooled = TRUE` flag or `attribute_pool` table. `world_tick()` spawn logic seeds new entities from the pool.
 
 ---
 
