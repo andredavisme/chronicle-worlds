@@ -123,6 +123,20 @@ function parseCommand(raw) {
   return null
 }
 
+// ─── Stat delta display ──────────────────────────────────────────
+// Formats a stat_deltas object from the Edge Function response into a
+// human-readable string, e.g. "inspiration +3" or "health -3 (char #7)"
+function formatStatDeltas(statDeltas) {
+  if (!statDeltas?.length) return null
+  return statDeltas
+    .map(d => {
+      const sign = d.delta > 0 ? '+' : ''
+      const target = d.target_character_id ? ` (char #${d.target_character_id})` : ''
+      return `${d.attribute} ${sign}${d.delta}${target}`
+    })
+    .join(' · ')
+}
+
 // ─── Auth UI ────────────────────────────────────────────────────────
 document.getElementById('auth-sign-in').addEventListener('click', async () => {
   const email    = document.getElementById('auth-email').value
@@ -384,9 +398,11 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
     setActionsDisabled(true)
     try {
       await submitAction('travel', { destination_grid_cell_id: cellId })
+      // Option A fix: do NOT call setActionsDisabled(false) here.
+      // The cooldown onDisabled callback is the sole authority on re-enabling.
     } catch (e) {
       statusEl.textContent = `error: ${e.message}`
-    } finally {
+      // Only re-enable on error (cooldown was not started)
       setActionsDisabled(false)
     }
   })
@@ -412,12 +428,12 @@ async function executeAction(action, characterId, user, opts = {}) {
         : `entering ${copyName ?? `cell to the ${opts.direction}`}…`
       try {
         await submitAction('travel', { destination_grid_cell_id: cellId })
+        // Option A fix: do NOT call setActionsDisabled(false) here.
         return { ok: true, copyName }
       } catch (e) {
         statusEl.textContent = `error: ${e.message}`
+        setActionsDisabled(false) // only re-enable on error
         return { error: e.message }
-      } finally {
-        setActionsDisabled(false)
       }
     }
 
@@ -430,9 +446,10 @@ async function executeAction(action, characterId, user, opts = {}) {
     setActionsDisabled(true)
     statusEl.textContent = 'exchanging information…'
     try {
-      await submitAction(action)
-      statusEl.textContent = `connected as ${user.email}`
-      return { ok: true }
+      const data = await submitAction(action)
+      const delta = formatStatDeltas(data?.stat_deltas)
+      statusEl.textContent = delta ? `${delta} — ${user.email}` : `connected as ${user.email}`
+      return { ok: true, statDeltas: data?.stat_deltas }
     } catch (e) {
       statusEl.textContent = `error: ${e.message}`
       return { error: e.message }
@@ -469,9 +486,10 @@ async function executeAction(action, characterId, user, opts = {}) {
     setActionsDisabled(true)
     statusEl.textContent = `submitting ${action} on char #${target_character_id}…`
     try {
-      await submitAction(action, details)
-      statusEl.textContent = `connected as ${user.email}`
-      return { ok: true, target_character_id }
+      const data = await submitAction(action, details)
+      const delta = formatStatDeltas(data?.stat_deltas)
+      statusEl.textContent = delta ? `${delta} — ${user.email}` : `connected as ${user.email}`
+      return { ok: true, target_character_id, statDeltas: data?.stat_deltas }
     } catch (e) {
       statusEl.textContent = `error: ${e.message}`
       return { error: e.message }
@@ -576,7 +594,9 @@ async function showGame(user) {
       else if (result?.ok) {
         const label = parsed.action.replace(/_/g, ' ')
         const extra = result.target_character_id ? ` on char #${result.target_character_id}` : ''
-        cmdLog(`${label}${extra} — resolved`, 'info')
+        const delta = formatStatDeltas(result.statDeltas)
+        const deltaStr = delta ? ` [${delta}]` : ''
+        cmdLog(`${label}${extra} — resolved${deltaStr}`, 'info')
       }
     }
   }

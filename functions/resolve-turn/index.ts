@@ -47,6 +47,17 @@ function computeTravelDuration(details: Record<string, number>): number {
 }
 
 // ---------------------------------------------------------------------------
+// Stat delta tracking
+// Accumulated during a turn and returned in the response for UI feedback.
+// ---------------------------------------------------------------------------
+
+interface StatDelta {
+  attribute: string;
+  delta: number;
+  target_character_id: number;
+}
+
+// ---------------------------------------------------------------------------
 // Attribute modifier map
 // For introduce_conflict the target is the *opponent* character, not the actor.
 // ---------------------------------------------------------------------------
@@ -66,7 +77,8 @@ const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
 };
 
 // ---------------------------------------------------------------------------
-// Insert attribute_modifier row AND apply it immediately to the character row
+// Insert attribute_modifier row AND apply it immediately to the character row.
+// Returns a StatDelta entry for the response payload.
 // ---------------------------------------------------------------------------
 
 async function applyModifier(
@@ -76,9 +88,9 @@ async function applyModifier(
   actorCharacterId: number,
   details: Record<string, number>,
   now: number
-) {
+): Promise<StatDelta | null> {
   const spec = ACTION_MODIFIERS[action];
-  if (!spec) return;
+  if (!spec) return null;
 
   const targetId = spec.target_is_opponent
     ? (details.target_character_id ?? actorCharacterId)
@@ -113,38 +125,39 @@ async function applyModifier(
       .update({ [spec.target_attribute]: current + delta })
       .eq('character_id', targetId);
   }
+
+  return { attribute: spec.target_attribute, delta, target_character_id: targetId };
 }
 
 // ---------------------------------------------------------------------------
-// exchange_material: transfer wealth from actor to target (or vice-versa)
-// details.wealth_amount defaults to 1; details.target_character_id required
+// exchange_material: transfer wealth from actor to target.
+// details.wealth_amount defaults to 1; details.target_character_id required.
+// Returns StatDelta entries for both sides.
 // ---------------------------------------------------------------------------
 
 async function handleExchangeMaterial(
   supabase: SupabaseClient,
   actorCharacterId: number,
   details: Record<string, number>
-) {
+): Promise<StatDelta[]> {
   const amount = Math.max(1, details.wealth_amount ?? 1);
   const targetId = details.target_character_id ?? actorCharacterId;
 
-  if (targetId === actorCharacterId) return; // no-op if no target specified
+  if (targetId === actorCharacterId) return [];
 
-  // Deduct from actor
   const { data: actor } = await supabase
     .from('characters')
     .select('wealth')
     .eq('character_id', actorCharacterId)
     .single();
 
-  if (!actor || (actor as Record<string, number>).wealth < amount) return; // insufficient wealth
+  if (!actor || (actor as Record<string, number>).wealth < amount) return []; // insufficient wealth
 
   await supabase
     .from('characters')
     .update({ wealth: (actor as Record<string, number>).wealth - amount })
     .eq('character_id', actorCharacterId);
 
-  // Add to target
   const { data: target } = await supabase
     .from('characters')
     .select('wealth')
@@ -157,11 +170,16 @@ async function handleExchangeMaterial(
       .update({ wealth: (target as Record<string, number>).wealth + amount })
       .eq('character_id', targetId);
   }
+
+  return [
+    { attribute: 'wealth', delta: -amount, target_character_id: actorCharacterId },
+    { attribute: 'wealth', delta: amount,  target_character_id: targetId },
+  ];
 }
 
 // ---------------------------------------------------------------------------
-// travel: close old entity_position, open new one at destination grid cell
-// details.destination_grid_cell_id required
+// travel: close old entity_position, open new one at destination grid cell.
+// details.destination_grid_cell_id required.
 // ---------------------------------------------------------------------------
 
 async function handleTravel(
@@ -173,7 +191,6 @@ async function handleTravel(
   const destCellId = details.destination_grid_cell_id;
   if (!destCellId) return;
 
-  // Close current open position
   await supabase
     .from('entity_positions')
     .update({ timestamp_end: now })
@@ -181,7 +198,6 @@ async function handleTravel(
     .eq('entity_id', actorCharacterId)
     .is('timestamp_end', null);
 
-  // Open new position at destination
   await supabase.from('entity_positions').insert({
     entity_type: 'character',
     entity_id: actorCharacterId,
@@ -198,7 +214,6 @@ async function handleTravel(
 // ---------------------------------------------------------------------------
 
 serve(async (req: Request) => {
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS });
   }
@@ -269,7 +284,7 @@ serve(async (req: Request) => {
     const now = Date.now() / 1000;
     const submitTimestamp: number = details.submit_timestamp ?? now;
     const sequenceIndex: number = details.sequence_index ?? 0;
-    const endTimestamp: number = now + duration; // duration units map 1:1 to seconds for simplicity
+    const endTimestamp: number = now + duration;
 
     // ------------------------------------------------------------------
     // 4. Branch fork limit check (time travel backward)
@@ -324,17 +339,21 @@ serve(async (req: Request) => {
     const eventId: number = event.event_id;
 
     // ------------------------------------------------------------------
-    // 6. Action-specific side effects
+    // 6. Action-specific side effects — collect stat_deltas for response
     // ------------------------------------------------------------------
+    const statDeltas: StatDelta[] = [];
+
     if (action === 'exchange_material') {
-      await handleExchangeMaterial(supabase, characterId, details);
+      const deltas = await handleExchangeMaterial(supabase, characterId, details);
+      statDeltas.push(...deltas);
     } else if (action === 'travel') {
       await handleTravel(supabase, characterId, details, now);
     }
 
     // Apply attribute modifier (all non-travel actions)
     if (action !== 'travel') {
-      await applyModifier(supabase, action, eventId, characterId, details, now);
+      const modDelta = await applyModifier(supabase, action, eventId, characterId, details, now);
+      if (modDelta) statDeltas.push(modDelta);
     }
 
     // ------------------------------------------------------------------
@@ -379,11 +398,12 @@ serve(async (req: Request) => {
         action,
         turn_number: event.turn_number ?? null,
         duration_units: duration,
+        stat_deltas: statDeltas,
       },
     });
 
     return new Response(
-      JSON.stringify({ status: 'resolved', event_id: eventId, duration_units: duration }),
+      JSON.stringify({ status: 'resolved', event_id: eventId, duration_units: duration, stat_deltas: statDeltas }),
       { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
