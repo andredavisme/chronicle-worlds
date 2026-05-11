@@ -252,8 +252,8 @@ See prior entry for full details. Summary:
 - `app.js`: travel handler now checks `getCooldownRemaining() > 0` before opening modal (belt-and-suspenders alongside `btn.disabled`)
 - `index.html`: `.action-btn:disabled` strengthened — added `color: #444`, `border-color: #1e1e1e`, `pointer-events: none` so the greyed state is visually distinct on the dark `#111` background
 
-**Known outstanding issue:**
-- The travel `finally { setActionsDisabled(false) }` block races with `onDisabled(true)` from `startCooldown()` — `finally` fires after `submitAction` resolves but before the cooldown disable propagates, potentially re-enabling buttons momentarily. Fix: remove `setActionsDisabled(false)` from the travel direction button `finally` and let the cooldown callback own re-enabling exclusively.
+**Known outstanding issue (fixed in Milestone 15):**
+- The travel `finally { setActionsDisabled(false) }` block races with `onDisabled(true)` from `startCooldown()` — `finally` fires after `submitAction` resolves but before the cooldown disable propagates, potentially re-enabling buttons momentarily.
 
 **Validated live:**
 - char1 navigated from `(1,0,0)` → `(0,0,0)` during this session
@@ -262,12 +262,63 @@ See prior entry for full details. Summary:
 
 ---
 
+### ✅ Milestone 15 — Fix Travel `finally` Race (Option A)
+**Date:** 2026-05-11 | **Status:** Complete
+**Commit:** `7f2d7a8`
+
+**What was done:**
+- Removed `setActionsDisabled(false)` from the success path of the travel direction button `click` handler in `app.js`
+- Removed `setActionsDisabled(false)` from the success path of the text-mode `executeAction('travel')` branch
+- Both paths now call `setActionsDisabled(false)` **only on error** (when cooldown was never started)
+- The cooldown `onDisabled(false)` callback fired by `turn-manager.js` at timer expiry is now the sole authority on re-enabling actions after a successful travel
+
+**Root cause:** `try/finally` guaranteed `setActionsDisabled(false)` ran immediately after `submitAction` resolved, racing against `startCooldown()` → `onDisabledChange(true)` which fired synchronously in the same microtask queue. On fast machines the race was consistent.
+
+**Key decisions:**
+- Error path still calls `setActionsDisabled(false)` directly — cooldown only starts on a resolved turn, so manual re-enable is correct on error
+- No change to `turn-manager.js` — the fix is purely in how `app.js` consumes the result
+
+---
+
+### ✅ Milestone 16 — Richer Action Mechanics + Stat Delta Feedback (Option E)
+**Date:** 2026-05-11 | **Status:** Complete
+**Edge Function:** `resolve-turn` (v4, ACTIVE) | **Commit:** `7f2d7a8`
+
+**What was done:**
+
+**Edge Function (`resolve-turn` v4):**
+- Added `StatDelta` interface: `{ attribute: string, delta: number, target_character_id: number }`
+- `applyModifier()` now returns `StatDelta | null` instead of `void`
+- `handleExchangeMaterial()` now returns `StatDelta[]` covering both sides of the transfer:
+  - Actor: `{ attribute: 'wealth', delta: -amount, target_character_id: actorId }`
+  - Target: `{ attribute: 'wealth', delta: +amount, target_character_id: targetId }`
+- All deltas accumulated into `statDeltas[]` and included in:
+  - HTTP `200` response body: `{ status, event_id, duration_units, stat_deltas }`
+  - `turn_resolved` Realtime broadcast payload: `{ ..., stat_deltas }`
+
+**Frontend (`app.js`):**
+- New `formatStatDeltas(statDeltas)` helper — formats array into human string, e.g. `inspiration +3` or `health -3 (char #7)`
+- Status bar updated after each action: e.g. `inspiration +3 — dev@chronicle.local`
+- Text command mode logs the delta inline: e.g. `exchange information — resolved [inspiration +3]`
+
+**Action → stat effects (unchanged from schema design, now surfaced to UI):**
+| Action | Attribute | Delta | Target |
+|---|---|---|---|
+| `exchange_information` | inspiration | +3 | actor |
+| `resolve_conflict` | health | +3 | actor |
+| `introduce_conflict` | health | -3 | opponent |
+| `exchange_material` | wealth | −amount (actor) · +amount (target) | both |
+
+**Key decisions:**
+- `exchange_material` stat delta bypasses `applyModifier()` (which adds a fixed +3 to actor wealth) — the transfer deltas from `handleExchangeMaterial()` are the authoritative feedback
+- `stat_deltas` is an array to allow multi-target actions (e.g. exchange_material affects two characters) without a schema change
+- Display is best-effort: if `stat_deltas` is absent (queued response, old function version), UI falls back to `connected as [email]` silently
+
+---
+
 ## 🔼 Next Milestone Candidates
 
 Choose one to tackle next:
-
-### Option A — Fix Travel `finally` Race (Quick)
-Remove `setActionsDisabled(false)` from the travel direction button `finally` block so the cooldown `onDisabled` callback is the sole authority on re-enabling. One-line fix in `app.js`.
 
 ### Option B — Text Command Mode (Idea 4)
 Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
@@ -278,8 +329,8 @@ Insert/update `attribute_modifiers` when a character's age crosses youth/prime/e
 ### Option D — Attribute Pool on Entity Destruction (Idea 1)
 Destruction trigger on `characters.health = 0` / `materials.durability = 0`. Moves `attribute_modifiers` rows into a `pooled = TRUE` flag or `attribute_pool` table. `world_tick()` spawn logic seeds new entities from the pool.
 
-### Option E — Remaining Action Mechanics
-The four targeted actions are now UI-complete but their Edge Function effects are minimal. Define richer outcomes: conflict changes health, exchange_material transfers wealth, exchange_information transfers inspiration.
+### Option F — Vertical z-Axis Physical Mechanics (Idea 3)
+Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. `seed_setting_grid()` gains `z_layers` param. Height advantage modifier on conflict actions.
 
 ---
 
@@ -383,7 +434,7 @@ The four targeted actions are now UI-complete but their Edge Function effects ar
 | Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
 | Migration 013 | `013_add_setting_discovery_fields` — max_cells + cycle_order on settings |
 | Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS |
-| Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
+| Edge Function | `resolve-turn` (ID: `a68468fa`, v4, ACTIVE) |
 | Edge Function | `discover-cell` (ID: `da7a0ccb`, v3, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
