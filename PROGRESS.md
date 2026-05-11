@@ -234,21 +234,52 @@ See prior entry for full details. Summary:
 
 ---
 
+### ✅ Milestone 14 — Target Action UI (exchange_information, introduce_conflict, resolve_conflict, exchange_material)
+**Date:** 2026-05-11 | **Status:** Complete
+**Commits:** `d362196` (turn-manager onDisabled), `c233e40` (app.js wire-up), `0521e1d` (travel cooldown guard), `dc6449e` (disabled button CSS)
+
+**What was done:**
+- Added target-picker modal (`#target-modal`) to `index.html` — lists co-located characters with hp/wealth/inspiration stats
+- `exchange_material` flow includes an amount input field (`#target-amount`) in the modal
+- `getColocatedCharacters(actorCharacterId)` — queries `entity_positions` for other characters sharing the same `grid_cell_id`, then fetches their `characters` stats
+- `openTargetModal(action, actorCharacterId, colocated)` — returns a Promise resolving to `{ target_character_id, wealth_amount? }` or `null` on cancel
+- All four targeted actions now fully wired in `app.js` action button handler
+- `exchange_information` submits directly (self-action, no target needed)
+
+**Cooldown UX fixes (same session):**
+- `turn-manager.js`: added `onDisabledChange` callback — `startCooldown()` now fires `onDisabledChange(true)` immediately and `onDisabledChange(false)` when timer expires
+- `app.js`: wired `onDisabled: (disabled) => setActionsDisabled(disabled)` into `initTurnManager`
+- `app.js`: travel handler now checks `getCooldownRemaining() > 0` before opening modal (belt-and-suspenders alongside `btn.disabled`)
+- `index.html`: `.action-btn:disabled` strengthened — added `color: #444`, `border-color: #1e1e1e`, `pointer-events: none` so the greyed state is visually distinct on the dark `#111` background
+
+**Known outstanding issue:**
+- The travel `finally { setActionsDisabled(false) }` block races with `onDisabled(true)` from `startCooldown()` — `finally` fires after `submitAction` resolves but before the cooldown disable propagates, potentially re-enabling buttons momentarily. Fix: remove `setActionsDisabled(false)` from the travel direction button `finally` and let the cooldown callback own re-enabling exclusively.
+
+**Validated live:**
+- char1 navigated from `(1,0,0)` → `(0,0,0)` during this session
+- Target modal renders co-located character list with stats
+- All four targeted actions submit successfully
+
+---
+
 ## 🔼 Next Milestone Candidates
 
 Choose one to tackle next:
 
-### Option A — Text Command Mode (Idea 4)
-Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
+### Option A — Fix Travel `finally` Race (Quick)
+Remove `setActionsDisabled(false)` from the travel direction button `finally` block so the cooldown `onDisabled` callback is the sole authority on re-enabling. One-line fix in `app.js`.
 
-### Option B — Remaining Actions (exchange_info, introduce_conflict, resolve_conflict, exchange_material)
-The 4 non-travel actions are wired in the Edge Function but have no target-selection UI. Each needs a character/entity picker before the submit call. Simplest form: submit against the nearest character in the same grid cell.
+### Option B — Text Command Mode (Idea 4)
+Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
 
 ### Option C — Age-Based Attribute Modification (Idea 2)
 Insert/update `attribute_modifiers` when a character's age crosses youth/prime/elder brackets in `world_tick()`. Bracket thresholds as constants. Permanent accumulating modifiers.
 
 ### Option D — Attribute Pool on Entity Destruction (Idea 1)
 Destruction trigger on `characters.health = 0` / `materials.durability = 0`. Moves `attribute_modifiers` rows into a `pooled = TRUE` flag or `attribute_pool` table. `world_tick()` spawn logic seeds new entities from the pool.
+
+### Option E — Remaining Action Mechanics
+The four targeted actions are now UI-complete but their Edge Function effects are minimal. Define richer outcomes: conflict changes health, exchange_material transfers wealth, exchange_information transfers inspiration.
 
 ---
 
