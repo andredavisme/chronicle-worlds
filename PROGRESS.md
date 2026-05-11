@@ -68,17 +68,35 @@ See prior entry for full details. Summary:
 
 ---
 
-### 🔼 Next: Milestone 11 — Travel Action + Grid Movement
+### ✅ Milestone 11 — Travel Action + Grid Movement
+**Date:** 2026-05-10 | **Status:** Complete
+**Commit:** `feat(m11): Travel action direction picker + grid movement`
+
+**What was done:**
+- `docs/index.html`: Travel button now opens a direction picker modal (N/S/E/W/Up/Down) instead of submitting immediately
+- `getAdjacentCellId(direction, characterId)`: queries actor's current open `entity_positions` row to get current (x,y,z), applies `DIR_DELTA` offset, looks up the resulting `grid_cells` row — returns `grid_cell_id` or a user-facing error string if no cell exists in that direction
+- On direction chosen: calls `submitAction('travel', { destination_grid_cell_id })` — Edge Function `handleTravel()` closes old position row, inserts new one at target cell (already implemented in M10 Edge Function)
+- Validation: direction buttons disabled while lookup is in-flight; error message shown in modal if target cell doesn't exist (e.g. boundary of the 7×7 grid)
+- `entity_positions` Realtime channel already wired — grid redraws automatically on position change
+- Player's `controlled_character_id` resolved once on login and passed to modal
+
+**Key decisions:**
+- Direction picker uses a 3×3 grid layout: N/S/E/W in compass cross, Up top-right, Down bottom-left
+- Cross-setting travel deferred to a future milestone (cell lookup scoped to existing `grid_cells` rows only)
+- No server-side direction encoding needed — `destination_grid_cell_id` is the canonical travel payload
+
+---
+
+### 🔼 Next: Milestone 12 — Character Position Display + Current Cell UI
 **Status:** Not started
 
-**Goal:** Make the Travel action actually move a character between `grid_cells`. Right now `resolve-turn` handles Travel but doesn't update `entity_positions`.
+**Goal:** Show the player their character's current grid position (x, y, z) and setting in the sidebar, and highlight their character's cell on the isometric canvas.
 
 **Scope:**
-- [ ] Edge Function `resolve-turn`: on `travel` action, close current `entity_positions` row (`timestamp_end = now()`), insert new row at target cell
-- [ ] Determine target cell: direction (N/S/E/W/up/down) encoded in action payload, or explicit `target_cell_id`
-- [ ] Frontend: Travel button opens a direction picker before submitting
-- [ ] Validate: target cell must exist, have capacity, be in same setting (cross-setting travel = future milestone)
-- [ ] `entity_positions` change fires Realtime → grid redraws automatically (already wired in M10)
+- [ ] Sidebar: add a `#char-position` element showing `pos: (x, y, z)` updated on each `entity_positions` Realtime event
+- [ ] Grid renderer: highlight the local player's character cell with a distinct ring/glow vs. other entities
+- [ ] Footer or sidebar: show current setting name alongside world time
+- [ ] Direction picker: grey out / disable direction buttons for directions where no adjacent cell exists (pre-validate all 6 directions on modal open)
 
 ---
 
@@ -145,7 +163,7 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 | Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated |
 | du vs tu | du = real-time ticks (global), tu = story-time per setting |
 | Client cooldown | 1 real minute (UX only) |
-| Default setting_id | `1` (hardcoded in `turn-manager.js`) |
+| Default setting_id | `1` (hardcoded in turn-manager.js) |
 | Auth storage | `sessionStorage` |
 | CDN | `unpkg.com/@supabase/supabase-js@2` |
 | Inspired by | [andredavisme/the-world](https://github.com/andredavisme/the-world) |

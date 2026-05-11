@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chronicle Worlds</title>
-    <!-- inline SVG favicon — no 404 -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230a0a0f'/><ellipse cx='16' cy='20' rx='10' ry='5' fill='%23224422'/><ellipse cx='16' cy='16' rx='6' ry='3' fill='%236688ff'/><ellipse cx='16' cy='12' rx='3' ry='1.5' fill='%238888cc'/></svg>" />
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -114,6 +113,69 @@
         gap: 16px;
         align-items: center;
       }
+
+      /* ── Direction Picker Modal ── */
+      #travel-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.75);
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      #travel-modal.open { display: flex; }
+      #travel-modal-inner {
+        background: #111;
+        border: 1px solid #4444aa;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-width: 220px;
+      }
+      #travel-modal-inner h3 {
+        font-size: 0.8rem;
+        color: #8888cc;
+        letter-spacing: 1px;
+        text-align: center;
+      }
+      #travel-modal-inner p#travel-error {
+        font-size: 0.72rem;
+        color: #cc4444;
+        min-height: 1em;
+        text-align: center;
+      }
+      .dir-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+      .dir-btn {
+        background: #1a1a2a;
+        border: 1px solid #333;
+        color: #aaa;
+        padding: 8px 4px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.8rem;
+        text-align: center;
+        transition: border-color 0.15s;
+      }
+      .dir-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .dir-btn.empty { border-color: transparent; background: transparent; cursor: default; }
+      #travel-cancel {
+        background: transparent;
+        border: 1px solid #333;
+        color: #555;
+        padding: 6px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.75rem;
+        text-align: center;
+      }
+      #travel-cancel:hover { border-color: #666; color: #aaa; }
     </style>
   </head>
   <body>
@@ -136,6 +198,7 @@
     <div id="game-area">
       <canvas id="grid-canvas"></canvas>
     </div>
+
     <div id="sidebar">
       <div>
         <h2>ACTIONS</h2>
@@ -153,25 +216,43 @@
       </div>
     </div>
 
+    <!-- Direction Picker Modal -->
+    <div id="travel-modal">
+      <div id="travel-modal-inner">
+        <h3>CHOOSE DIRECTION</h3>
+        <p id="travel-error"></p>
+        <!-- compass layout: Up top-right, Down bottom-left; N/S/E/W in cross -->
+        <div class="dir-grid">
+          <button class="dir-btn empty" disabled></button>
+          <button class="dir-btn" data-dir="north">N</button>
+          <button class="dir-btn" data-dir="up">&#x25B2; Up</button>
+
+          <button class="dir-btn" data-dir="west">W</button>
+          <button class="dir-btn empty" disabled>&#x25CF;</button>
+          <button class="dir-btn" data-dir="east">E</button>
+
+          <button class="dir-btn" data-dir="down">&#x25BC; Dn</button>
+          <button class="dir-btn" data-dir="south">S</button>
+          <button class="dir-btn empty" disabled></button>
+        </div>
+        <button id="travel-cancel">cancel</button>
+      </div>
+    </div>
+
     <footer>
       <span id="player-info">—</span>
       <span id="turn-info">—</span>
       <span id="branch-info">branch: root</span>
+      <span id="world-time" style="margin-left:auto">—</span>
     </footer>
 
     <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
     <script>
-      // UMD global is `supabase`; our client is `sb` to avoid the name clash.
-      // sessionStorage avoids Tracking Prevention warnings (no cross-origin localStorage).
       const SUPABASE_URL = 'https://hhyhulqngdkwsxhymmcd.supabase.co'
       const SUPABASE_KEY = 'sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI'
       const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: {
-          storage:        window.sessionStorage,
-          persistSession: true,
-          autoRefreshToken: true,
-        }
+        auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true }
       })
 
       const authPanel       = document.getElementById('auth-panel')
@@ -182,11 +263,14 @@
       const playerInfoEl    = document.getElementById('player-info')
       const turnInfoEl      = document.getElementById('turn-info')
       const branchInfoEl    = document.getElementById('branch-info')
+      const worldTimeEl     = document.getElementById('world-time')
       const chronicleListEl = document.getElementById('chronicle-list')
       const canvas          = document.getElementById('grid-canvas')
       const signOutBtn      = document.getElementById('auth-sign-out')
+      const travelModal     = document.getElementById('travel-modal')
+      const travelError     = document.getElementById('travel-error')
 
-      // ─── Grid renderer
+      // ─── Grid renderer ───────────────────────────────────────────────
       let ctx, entities = []
       const TILE_W = 48, TILE_H = 24
 
@@ -243,7 +327,93 @@
         }
       }
 
-      // ─── Chronicle
+      // ─── Direction → coordinate delta ────────────────────────────────
+      const DIR_DELTA = {
+        north: { dx:  0, dy: -1, dz:  0 },
+        south: { dx:  0, dy:  1, dz:  0 },
+        east:  { dx:  1, dy:  0, dz:  0 },
+        west:  { dx: -1, dy:  0, dz:  0 },
+        up:    { dx:  0, dy:  0, dz:  1 },
+        down:  { dx:  0, dy:  0, dz: -1 },
+      }
+
+      // Returns the grid_cell_id of the cell adjacent in `direction` to
+      // the current player character, or null if no such cell exists.
+      async function getAdjacentCellId(direction, characterId) {
+        // 1. Find actor's current grid cell
+        const { data: pos, error: posErr } = await sb
+          .from('entity_positions')
+          .select('grid_cell_id, grid_cells(x, y, z)')
+          .eq('entity_type', 'character')
+          .eq('entity_id', characterId)
+          .is('timestamp_end', null)
+          .single()
+
+        if (posErr || !pos) return { cellId: null, error: 'Could not find your current position.' }
+
+        const { dx, dy, dz } = DIR_DELTA[direction]
+        const tx = (pos.grid_cells?.x ?? 0) + dx
+        const ty = (pos.grid_cells?.y ?? 0) + dy
+        const tz = (pos.grid_cells?.z ?? 0) + dz
+
+        // 2. Look up target cell
+        const { data: cell, error: cellErr } = await sb
+          .from('grid_cells')
+          .select('grid_cell_id')
+          .eq('x', tx).eq('y', ty).eq('z', tz)
+          .single()
+
+        if (cellErr || !cell) return { cellId: null, error: `No cell exists to the ${direction}.` }
+        return { cellId: cell.grid_cell_id, error: null }
+      }
+
+      // ─── Travel modal ─────────────────────────────────────────────────
+      let travelCharacterId = null
+
+      async function openTravelModal(characterId) {
+        travelCharacterId = characterId
+        travelError.textContent = ''
+        travelModal.classList.add('open')
+      }
+
+      function closeTravelModal() {
+        travelModal.classList.remove('open')
+        travelError.textContent = ''
+        travelCharacterId = null
+      }
+
+      document.getElementById('travel-cancel').addEventListener('click', closeTravelModal)
+
+      // Close on backdrop click
+      travelModal.addEventListener('click', e => { if (e.target === travelModal) closeTravelModal() })
+
+      document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const direction = btn.dataset.dir
+          travelError.textContent = ''
+          document.querySelectorAll('.dir-btn').forEach(b => b.disabled = true)
+
+          const { cellId, error } = await getAdjacentCellId(direction, travelCharacterId)
+          if (error || !cellId) {
+            travelError.textContent = error || 'No cell in that direction.'
+            document.querySelectorAll('.dir-btn[data-dir]').forEach(b => b.disabled = false)
+            return
+          }
+
+          closeTravelModal()
+          setActionsDisabled(true)
+          statusEl.textContent = `travelling ${direction}…`
+          try {
+            await submitAction('travel', { destination_grid_cell_id: cellId })
+          } catch (e) {
+            statusEl.textContent = `error: ${e.message}`
+          } finally {
+            setActionsDisabled(false)
+          }
+        })
+      })
+
+      // ─── Chronicle ───────────────────────────────────────────────────
       async function loadChronicle() {
         const { data, error } = await sb
           .from('chronicle')
@@ -276,7 +446,14 @@
         chronicleListEl.prepend(div)
       }
 
-      // ─── Turn manager
+      // ─── World time ──────────────────────────────────────────────────
+      async function loadWorldTime() {
+        const { data: tick } = await sb.from('world_tick_state').select('duration_unit').eq('id', 1).single()
+        const { data: setting } = await sb.from('settings').select('time_unit').eq('setting_id', 1).single()
+        if (tick && setting) worldTimeEl.textContent = `tu: ${setting.time_unit} · du: ${tick.duration_unit}`
+      }
+
+      // ─── Turn manager ────────────────────────────────────────────────
       const COOLDOWN_MS = 60_000, DEFAULT_SETTING_ID = 1
       let cooldownEnd = 0, cooldownTimer = null
 
@@ -314,7 +491,7 @@
         return data
       }
 
-      // ─── Auth
+      // ─── Auth ────────────────────────────────────────────────────────
       document.getElementById('auth-sign-in').addEventListener('click', async () => {
         const email = document.getElementById('auth-email').value.trim()
         const password = document.getElementById('auth-password').value
@@ -337,7 +514,7 @@
         if (e.key === 'Enter') document.getElementById('auth-sign-in').click()
       })
 
-      // ─── Auth state machine
+      // ─── Auth state machine ──────────────────────────────────────────
       sb.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) showGame(session.user)
         else               showAuth()
@@ -352,11 +529,27 @@
         initGridRenderer()
         await loadEntityPositions()
         await loadChronicle()
+        await loadWorldTime()
+
+        // Resolve player's controlled character id for travel
+        let characterId = null
+        const { data: playerRow } = await sb
+          .from('players')
+          .select('controlled_character_id')
+          .eq('player_id', user.id)
+          .single()
+        if (playerRow) characterId = playerRow.controlled_character_id
 
         document.querySelectorAll('.action-btn').forEach(btn => {
           const fresh = btn.cloneNode(true)
           btn.parentNode.replaceChild(fresh, btn)
           fresh.addEventListener('click', async () => {
+            if (fresh.dataset.action === 'travel') {
+              // Travel opens the direction picker instead of submitting immediately
+              if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
+              openTravelModal(characterId)
+              return
+            }
             setActionsDisabled(true)
             statusEl.textContent = `submitting ${fresh.dataset.action}…`
             try {
@@ -372,6 +565,22 @@
             loadEntityPositions(); loadChronicle(); startCooldown()
             branchInfoEl.textContent = `branch: ${(payload.branch_id ?? 0) === 0 ? 'root' : payload.branch_id}`
           })
+          .subscribe()
+
+        sb.channel('world-tick')
+          .on('postgres_changes',
+              { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
+              (payload) => {
+                const du = payload.new?.duration_unit
+                statusEl.textContent = `connected as ${user.email} · du: ${du}`
+                loadWorldTime()
+              })
+          .subscribe()
+
+        sb.channel('entity-positions')
+          .on('postgres_changes',
+              { event: '*', schema: 'public', table: 'entity_positions' },
+              () => { loadEntityPositions() })
           .subscribe()
       }
 
