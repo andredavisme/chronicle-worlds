@@ -98,6 +98,44 @@
       }
       #world-time { color: #446644; }
 
+      /* ── Direction Picker Modal ── */
+      #travel-modal {
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.75);
+        align-items: center; justify-content: center;
+        z-index: 200;
+      }
+      #travel-modal.open { display: flex; }
+      #travel-modal-inner {
+        background: #111; border: 1px solid #4444aa;
+        padding: 20px; display: flex; flex-direction: column; gap: 12px;
+        min-width: 220px;
+      }
+      #travel-modal-inner h3 {
+        font-size: 0.8rem; color: #8888cc; letter-spacing: 1px; text-align: center;
+      }
+      #travel-error {
+        font-size: 0.72rem; color: #cc4444; min-height: 1em; text-align: center;
+      }
+      .dir-grid {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+      }
+      .dir-btn {
+        background: #1a1a2a; border: 1px solid #333; color: #aaa;
+        padding: 8px 4px; cursor: pointer; font-family: inherit;
+        font-size: 0.8rem; text-align: center; transition: border-color 0.15s;
+      }
+      .dir-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .dir-btn.empty { border-color: transparent; background: transparent; cursor: default; }
+      #travel-cancel {
+        background: transparent; border: 1px solid #333; color: #555;
+        padding: 6px; cursor: pointer; font-family: inherit;
+        font-size: 0.75rem; text-align: center;
+      }
+      #travel-cancel:hover { border-color: #666; color: #aaa; }
+
       @media (max-width: 767px) {
         body { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
         #mobile-panel-toggle { display: inline-block; margin-left: auto; }
@@ -142,6 +180,7 @@
     <div id="game-area">
       <canvas id="grid-canvas"></canvas>
     </div>
+
     <div id="sidebar">
       <div>
         <h2>ACTIONS</h2>
@@ -159,6 +198,26 @@
       </div>
     </div>
 
+    <!-- Direction Picker Modal -->
+    <div id="travel-modal">
+      <div id="travel-modal-inner">
+        <h3>CHOOSE DIRECTION</h3>
+        <p id="travel-error"></p>
+        <div class="dir-grid">
+          <button class="dir-btn empty" disabled></button>
+          <button class="dir-btn" data-dir="north">N</button>
+          <button class="dir-btn" data-dir="up">&#x25B2; Up</button>
+          <button class="dir-btn" data-dir="west">W</button>
+          <button class="dir-btn empty" disabled>&#x25CF;</button>
+          <button class="dir-btn" data-dir="east">E</button>
+          <button class="dir-btn" data-dir="down">&#x25BC; Dn</button>
+          <button class="dir-btn" data-dir="south">S</button>
+          <button class="dir-btn empty" disabled></button>
+        </div>
+        <button id="travel-cancel">cancel</button>
+      </div>
+    </div>
+
     <footer>
       <span id="player-info">—</span>
       <span id="turn-info">—</span>
@@ -166,10 +225,6 @@
       <span id="world-time">tu: — · du: —</span>
     </footer>
 
-    <script type="module" src="/src/supabase-client.js"></script>
-    <script type="module" src="/src/turn-manager.js"></script>
-    <script type="module" src="/src/grid-renderer.js"></script>
-    <script type="module" src="/src/chronicle-reader.js"></script>
     <script type="module" src="/src/app.js"></script>
 
     <script>
