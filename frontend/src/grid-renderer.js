@@ -1,12 +1,37 @@
 import { supabase } from './supabase-client.js'
 
 let canvas, ctx
-let entities   = [] // { entity_type, entity_id, x, y, z, effective_size }
+let entities      = [] // { entity_type, entity_id, x, y, z, effective_size }
 let settingBounds = [] // { min_x, max_x, min_y, max_y, z, setting_id }
-let localCharacterId = null // the current player's character — highlighted on canvas
+let gridCells     = [] // { x, y, z, setting_id } — all known cells for tinting
+let localCharacterId = null
 
 const BASE_TILE_W = 48
 const MIN_TILE_W  = 20
+
+// ─── Colour palette ──────────────────────────────────────────────────
+// 10 hues evenly spaced. setting_id mod 10 → stable colour per setting.
+const SETTING_PALETTE = [
+  { h: 210, s: 55, l: 55 }, // blue-grey   (S1, S11…)
+  { h:  35, s: 60, l: 52 }, // amber        (S2)
+  { h: 150, s: 50, l: 42 }, // teal-green   (S3)
+  { h: 280, s: 45, l: 58 }, // violet       (S4)
+  { h:   5, s: 58, l: 52 }, // burnt-red    (S5)
+  { h:  65, s: 55, l: 48 }, // olive        (S6)
+  { h: 185, s: 60, l: 48 }, // cyan         (S7)
+  { h: 320, s: 48, l: 55 }, // rose         (S8)
+  { h: 100, s: 50, l: 45 }, // lime-green   (S9)
+  { h: 245, s: 50, l: 58 }, // indigo       (S10)
+]
+
+function settingColour(settingId) {
+  const p = SETTING_PALETTE[(settingId - 1) % SETTING_PALETTE.length]
+  return {
+    fill:   `hsla(${p.h}, ${p.s}%, ${p.l}%, 0.18)`,
+    stroke: `hsla(${p.h}, ${p.s}%, ${p.l}%, 0.45)`,
+    label:  `hsla(${p.h}, ${p.s}%, ${Math.min(p.l + 20, 80)}%, 0.75)`,
+  }
+}
 
 export function setLocalCharacterId(id) {
   localCharacterId = id
@@ -41,6 +66,15 @@ function resizeCanvas() {
 }
 
 export async function loadEntityPositions() {
+  // Load all known grid cells for tinting (independent of entity occupancy)
+  const { data: cells, error: cellsErr } = await supabase
+    .from('grid_cells')
+    .select('x, y, z, setting_id')
+  if (!cellsErr) {
+    gridCells = (cells || []).map(r => ({ x: r.x, y: r.y, z: r.z, setting_id: r.setting_id }))
+  }
+
+  // Load entities with their positions
   const { data, error } = await supabase
     .from('entity_positions')
     .select('entity_type, entity_id, effective_size, grid_cells(x, y, z, setting_id)')
@@ -57,14 +91,14 @@ export async function loadEntityPositions() {
     z: row.grid_cells?.z ?? 0,
   }))
 
-  // Derive per-setting bounding boxes from grid_cells data
+  // Derive per-setting bounding boxes from the full grid_cells list
   const bySettingRaw = {}
-  for (const row of (data || [])) {
-    const sid = row.grid_cells?.setting_id
+  for (const cell of gridCells) {
+    const sid = cell.setting_id
     if (sid == null) continue
-    if (!bySettingRaw[sid]) bySettingRaw[sid] = { xs: [], ys: [], z: row.grid_cells?.z ?? 0, setting_id: sid }
-    bySettingRaw[sid].xs.push(row.grid_cells.x)
-    bySettingRaw[sid].ys.push(row.grid_cells.y)
+    if (!bySettingRaw[sid]) bySettingRaw[sid] = { xs: [], ys: [], z: cell.z, setting_id: sid }
+    bySettingRaw[sid].xs.push(cell.x)
+    bySettingRaw[sid].ys.push(cell.y)
   }
   settingBounds = Object.values(bySettingRaw).map(s => ({
     setting_id: s.setting_id,
@@ -80,7 +114,28 @@ export function updateGrid(_payload) {
   loadEntityPositions()
 }
 
+// Draw a single isometric diamond tile for one grid cell
+function drawGridTile(cx, cy, cell, tw, th) {
+  const { sx, sy } = isoProject(cell.x, cell.y, cell.z, tw, th)
+  const hw = tw / 2  // half-width
+  const hh = th / 2  // half-height
+  const col = settingColour(cell.setting_id)
+
+  ctx.beginPath()
+  ctx.moveTo(cx + sx,      cy + sy - hh)  // top
+  ctx.lineTo(cx + sx + hw, cy + sy)        // right
+  ctx.lineTo(cx + sx,      cy + sy + hh)  // bottom
+  ctx.lineTo(cx + sx - hw, cy + sy)        // left
+  ctx.closePath()
+  ctx.fillStyle = col.fill
+  ctx.fill()
+  ctx.strokeStyle = col.stroke
+  ctx.lineWidth = 0.5
+  ctx.stroke()
+}
+
 function drawSettingBoundary(cx, cy, bound, tw, th) {
+  const col = settingColour(bound.setting_id)
   const corners = [
     isoProject(bound.min_x - 0.5, bound.min_y - 0.5, bound.z, tw, th),
     isoProject(bound.max_x + 0.5, bound.min_y - 0.5, bound.z, tw, th),
@@ -93,12 +148,12 @@ function drawSettingBoundary(cx, cy, bound, tw, th) {
     ctx.lineTo(cx + corners[i].sx, cy + corners[i].sy)
   }
   ctx.closePath()
-  ctx.strokeStyle = 'rgba(80, 80, 160, 0.35)'
-  ctx.lineWidth = 1
+  ctx.strokeStyle = col.stroke
+  ctx.lineWidth = 1.5
   ctx.stroke()
 
   const top = corners.reduce((a, b) => a.sy < b.sy ? a : b)
-  ctx.fillStyle = 'rgba(80, 80, 160, 0.5)'
+  ctx.fillStyle = col.label
   ctx.font = '9px Courier New'
   ctx.textAlign = 'center'
   ctx.fillText(`S${bound.setting_id}`, cx + top.sx, cy + top.sy - 4)
@@ -106,7 +161,6 @@ function drawSettingBoundary(cx, cy, bound, tw, th) {
 }
 
 function drawLocalHighlight(cx, cy, sx, sy, r) {
-  // Outer glow ring
   const gradient = ctx.createRadialGradient(
     cx + sx, cy + sy, r * 0.8,
     cx + sx, cy + sy, r * 2.2
@@ -118,7 +172,6 @@ function drawLocalHighlight(cx, cy, sx, sy, r) {
   ctx.fillStyle = gradient
   ctx.fill()
 
-  // Crisp ring
   ctx.beginPath()
   ctx.ellipse(cx + sx, cy + sy, r * 1.65, r * 1.65 * 0.55, 0, 0, Math.PI * 2)
   ctx.strokeStyle = 'rgba(100, 220, 100, 0.7)'
@@ -134,28 +187,32 @@ function render() {
   const cy = canvas.height / 2
   const { tw, th } = getTileSize()
 
-  // Draw setting boundaries first (behind entities)
+  // 1. Tile fill — draw every known cell tinted by setting
+  for (const cell of gridCells) {
+    drawGridTile(cx, cy, cell, tw, th)
+  }
+
+  // 2. Setting boundary outlines (on top of tiles, behind entities)
   for (const bound of settingBounds) {
     drawSettingBoundary(cx, cy, bound, tw, th)
   }
 
-  // Draw entities
+  // 3. Entities
   for (const e of entities) {
     const { sx, sy } = isoProject(e.x, e.y, e.z, tw, th)
     const r = Math.max(3, e.effective_size * (tw / 8))
     const isLocal = e.entity_type === 'character' && e.entity_id === localCharacterId
 
-    // Draw highlight glow behind local character
     if (isLocal) drawLocalHighlight(cx, cy, sx, sy, r)
 
     ctx.beginPath()
     ctx.ellipse(cx + sx, cy + sy, r, r * 0.55, 0, 0, Math.PI * 2)
 
-    if (isLocal)                          ctx.fillStyle = '#44ee88'
+    if (isLocal)                               ctx.fillStyle = '#44ee88'
     else if (e.entity_type === 'character')    ctx.fillStyle = '#6688ff'
-    else if (e.entity_type === 'setting') ctx.fillStyle = '#224422'
-    else if (e.entity_type === 'material')ctx.fillStyle = '#aa8844'
-    else                                  ctx.fillStyle = '#444466'
+    else if (e.entity_type === 'setting')      ctx.fillStyle = '#224422'
+    else if (e.entity_type === 'material')     ctx.fillStyle = '#aa8844'
+    else                                       ctx.fillStyle = '#444466'
     ctx.fill()
 
     if (tw >= 28) {
@@ -165,7 +222,7 @@ function render() {
     }
   }
 
-  if (entities.length === 0) {
+  if (entities.length === 0 && gridCells.length === 0) {
     ctx.fillStyle = '#2a2a3a'
     ctx.font = `${Math.max(10, tw / 4)}px Courier New`
     ctx.textAlign = 'center'
