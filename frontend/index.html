@@ -75,10 +75,16 @@
       .action-btn {
         background: #111; border: 1px solid #333; color: #aaa;
         padding: 8px 10px; cursor: pointer; font-family: inherit;
-        font-size: 0.8rem; text-align: left; transition: border-color 0.15s;
+        font-size: 0.8rem; text-align: left; transition: border-color 0.15s, opacity 0.15s;
       }
       .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
-      .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .action-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+        pointer-events: none;
+        color: #444;
+        border-color: #1e1e1e;
+      }
 
       /* ── Character position panel ── */
       #char-position-panel {
