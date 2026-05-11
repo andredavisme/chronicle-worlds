@@ -21,14 +21,14 @@ const charSettingEl   = document.getElementById('char-setting-name')
 const charSettingDescEl = document.getElementById('char-setting-desc')
 
 // Target modal elements
-const targetModal        = document.getElementById('target-modal')
-const targetModalTitle   = document.getElementById('target-modal-title')
+const targetModal         = document.getElementById('target-modal')
+const targetModalTitle    = document.getElementById('target-modal-title')
 const targetModalSubtitle = document.getElementById('target-modal-subtitle')
-const targetError        = document.getElementById('target-error')
-const targetList         = document.getElementById('target-list')
-const targetEmpty        = document.getElementById('target-empty')
-const targetAmountRow    = document.getElementById('target-amount-row')
-const targetAmountInput  = document.getElementById('target-amount')
+const targetError         = document.getElementById('target-error')
+const targetList          = document.getElementById('target-list')
+const targetEmpty         = document.getElementById('target-empty')
+const targetAmountRow     = document.getElementById('target-amount-row')
+const targetAmountInput   = document.getElementById('target-amount')
 
 // Guard: onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on page load.
 let gameInitialised = false
@@ -112,7 +112,6 @@ async function getColocatedCharacters(actorCharacterId) {
   const cellId = await getCharacterCellId(actorCharacterId)
   if (!cellId) return []
 
-  // All characters currently in the same cell
   const { data: positions, error } = await supabase
     .from('entity_positions')
     .select('entity_id')
@@ -136,32 +135,26 @@ async function getColocatedCharacters(actorCharacterId) {
 
 // ─── Target modal ────────────────────────────────────────────────
 
-// Actions that require a target character in the same cell
 const TARGET_ACTIONS = new Set(['introduce_conflict', 'resolve_conflict', 'exchange_material'])
 
 const ACTION_LABELS = {
-  introduce_conflict:  { title: 'INTRODUCE CONFLICT', subtitle: 'choose a target character' },
-  resolve_conflict:    { title: 'RESOLVE CONFLICT',   subtitle: 'choose a character to resolve with' },
-  exchange_material:   { title: 'EXCHANGE MATERIAL',  subtitle: 'choose a character to trade with' },
+  introduce_conflict: { title: 'INTRODUCE CONFLICT', subtitle: 'choose a target character' },
+  resolve_conflict:   { title: 'RESOLVE CONFLICT',   subtitle: 'choose a character to resolve with' },
+  exchange_material:  { title: 'EXCHANGE MATERIAL',  subtitle: 'choose a character to trade with' },
 }
 
-let targetPendingAction   = null
-let targetPendingCharId   = null
-let targetResolve         = null  // Promise resolver so the modal result flows back to the click handler
+let targetResolve = null
 
-// Opens the target picker; returns { target_character_id, wealth_amount? } or null if cancelled.
+// Returns { target_character_id, wealth_amount? } on selection, or null on cancel.
 function openTargetModal(action, actorCharacterId, colocated) {
   return new Promise((resolve) => {
     targetResolve = resolve
-    targetPendingAction  = action
-    targetPendingCharId  = actorCharacterId
 
     const labels = ACTION_LABELS[action] ?? { title: 'CHOOSE TARGET', subtitle: '' }
     targetModalTitle.textContent    = labels.title
     targetModalSubtitle.textContent = labels.subtitle
     targetError.textContent = ''
 
-    // Show/hide amount input for exchange_material only
     if (action === 'exchange_material') {
       targetAmountRow.classList.add('visible')
       targetAmountInput.value = 1
@@ -169,7 +162,6 @@ function openTargetModal(action, actorCharacterId, colocated) {
       targetAmountRow.classList.remove('visible')
     }
 
-    // Populate target list
     targetList.innerHTML = ''
     if (!colocated.length) {
       targetEmpty.style.display = 'block'
@@ -186,7 +178,8 @@ function openTargetModal(action, actorCharacterId, colocated) {
           const amount = action === 'exchange_material'
             ? Math.max(1, parseInt(targetAmountInput.value, 10) || 1)
             : undefined
-          closeTargetModal()
+          // close WITHOUT firing null — selection is the resolution
+          closeTargetModal(false)
           resolve({ target_character_id: char.character_id, wealth_amount: amount })
         })
         targetList.appendChild(btn)
@@ -197,19 +190,22 @@ function openTargetModal(action, actorCharacterId, colocated) {
   })
 }
 
-function closeTargetModal() {
+// cancel=true  → user dismissed without selecting; resolve promise with null
+// cancel=false → called by a target button after it resolves the promise itself; just hide
+function closeTargetModal(cancel = true) {
   targetModal.classList.remove('open')
   targetError.textContent = ''
-  // If closed without selecting, resolve with null
-  if (targetResolve) {
+  if (cancel && targetResolve) {
     const r = targetResolve
     targetResolve = null
     r(null)
+  } else {
+    targetResolve = null
   }
 }
 
-document.getElementById('target-cancel').addEventListener('click', closeTargetModal)
-targetModal.addEventListener('click', e => { if (e.target === targetModal) closeTargetModal() })
+document.getElementById('target-cancel').addEventListener('click', () => closeTargetModal(true))
+targetModal.addEventListener('click', e => { if (e.target === targetModal) closeTargetModal(true) })
 
 // ─── Direction picker ───────────────────────────────────────────────
 const DIR_DELTA = {
@@ -391,7 +387,6 @@ async function showGame(user) {
           return
         }
 
-        // Re-enable buttons so the modal is usable (modal is its own flow)
         setActionsDisabled(false)
         statusEl.textContent = `connected as ${user.email}`
 
