@@ -1,5 +1,5 @@
 import { supabase, signIn, signUp, onAuthChange } from './supabase-client.js'
-import { initTurnManager, submitAction, resetCooldown } from './turn-manager.js'
+import { initTurnManager, submitAction, resetCooldown, getCooldownRemaining } from './turn-manager.js'
 import { initGridRenderer, loadEntityPositions, updateGrid, setLocalCharacterId } from './grid-renderer.js'
 import { loadChronicle, appendChronicleEntry } from './chronicle-reader.js'
 
@@ -347,8 +347,10 @@ async function showGame(user) {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action
 
+      // ── Travel: guard behind cooldown, then open direction picker ──
       if (action === 'travel') {
         if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
+        if (getCooldownRemaining() > 0) return  // buttons greyed, but double-guard for safety
         await openTravelModal(characterId)
         return
       }
