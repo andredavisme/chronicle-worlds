@@ -166,6 +166,28 @@ See prior entry for full details. Summary:
 
 ---
 
+### ✅ Housekeeping — Migration Audit + 004 Skip Decision
+**Date:** 2026-05-11 | **Status:** Complete
+
+**What was done:**
+- Reviewed all 10 repo migrations against Supabase migration history
+- Confirmed migrations 001–003 and 005–014 are applied to production
+- Confirmed migrations 011–014 (`011_public_read_world_state`, `012_public_read_game_tables`, `add_setting_discovery_fields`, `014_realities_and_entity_copies`) exist in Supabase but were not yet committed to the repo — **noted as a sync gap to resolve**
+
+**`004_milestone7_tests.sql` — Decision: SKIP (permanent)**
+- File is a QA/test script wrapped in `BEGIN` / `ROLLBACK` — it intentionally undoes all its inserts
+- Requires manual `PLAYER_A_UUID` substitution before running; would throw an exception as-is
+- Uses `CREATE TEMP TABLE` (session-scoped, not persistent)
+- Tests validated: `setting_id NOT NULL`, `advance_turn` trigger, `turn_queue` race ordering, branch limit (3), natural progression schedule, travel duration formula, RLS chronicle isolation
+- **Will never be applied to production.** Run manually in SQL Editor for schema validation only.
+
+**Repo sync gap — migrations 011–014:**
+- These 4 migrations were applied directly to Supabase during Milestones 11–13a but their SQL files are not in `backend/migrations/`
+- **Action needed:** pull SQL from Supabase schema and commit as `011_public_read_world_state.sql` through `014_realities_and_entity_copies.sql`
+- Low urgency (schema is live and correct) but required before onboarding new contributors
+
+---
+
 ### 🔼 Next: Milestone 13b — Setting Identity via Reality Layer
 **Status:** Not started
 
@@ -271,17 +293,17 @@ See prior entry for full details. Summary:
 | Migration 001 | `001_core_schema` — 10 base tables |
 | Migration 002 | `002_multiplayer_extensions` — players, branches, RLS, trigger, view |
 | Migration 003 | `003_developer_proposals` |
-| Migration 004 | `004_milestone7_tests` (ROLLBACK; reference only) |
+| Migration 004 | `004_milestone7_tests` (ROLLBACK; reference only — **never apply to production**) |
 | Migration 005 | `005_persist_test_fixtures` (COMMIT) |
 | Migration 006 | `006_auto_provision_players` — player provisioning trigger + backfill |
 | Migration 007 | `007_add_pk_sequences` — sequences for events, chronicle, attribute_modifiers, entity_positions |
 | Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
 | Migration 009 | `009_natural_progression_loop` — world_tick_state, proc_words, world_tick(), pg_cron |
 | Migration 010 | `010_world_seeding` — 7x7 grid_cells, entity_positions seed, seed_setting_grid(), REPLICA IDENTITY |
-| Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings |
-| Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
-| Migration 013 | `add_setting_discovery_fields` — max_cells + cycle_order on settings |
-| Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS |
+| Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings (**Supabase only — needs repo sync**) |
+| Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players (**Supabase only — needs repo sync**) |
+| Migration 013 | `add_setting_discovery_fields` — max_cells + cycle_order on settings (**Supabase only — needs repo sync**) |
+| Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS (**Supabase only — needs repo sync**) |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
 | Edge Function | `discover-cell` (ID: `da7a0ccb`, v2, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
