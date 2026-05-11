@@ -172,7 +172,7 @@ See prior entry for full details. Summary:
 **What was done:**
 - Reviewed all 10 repo migrations against Supabase migration history
 - Confirmed migrations 001–003 and 005–014 are applied to production
-- Confirmed migrations 011–014 (`011_public_read_world_state`, `012_public_read_game_tables`, `add_setting_discovery_fields`, `014_realities_and_entity_copies`) exist in Supabase but were not yet committed to the repo — **noted as a sync gap to resolve**
+- Confirmed migrations 011–014 (`011_public_read_world_state`, `012_public_read_game_tables`, `add_setting_discovery_fields`, `014_realities_and_entity_copies`) exist in Supabase but were not yet committed to the repo — sync gap later resolved during repo sync
 
 **`004_milestone7_tests.sql` — Decision: SKIP (permanent)**
 - File is a QA/test script wrapped in `BEGIN` / `ROLLBACK` — it intentionally undoes all its inserts
@@ -181,26 +181,50 @@ See prior entry for full details. Summary:
 - Tests validated: `setting_id NOT NULL`, `advance_turn` trigger, `turn_queue` race ordering, branch limit (3), natural progression schedule, travel duration formula, RLS chronicle isolation
 - **Will never be applied to production.** Run manually in SQL Editor for schema validation only.
 
-**Repo sync gap — migrations 011–014:**
-- These 4 migrations were applied directly to Supabase during Milestones 11–13a but their SQL files are not in `backend/migrations/`
-- **Action needed:** pull SQL from Supabase schema and commit as `011_public_read_world_state.sql` through `014_realities_and_entity_copies.sql`
-- Low urgency (schema is live and correct) but required before onboarding new contributors
+**Repo sync result — migrations 011–014:**
+- These 4 migrations were committed back into `backend/migrations/` and the repo is now in sync with production schema
+- New contributor bootstrap no longer depends on manual schema diffing
 
 ---
 
-### 🔼 Next: Milestone 13b — Setting Identity via Reality Layer
+### ✅ Milestone 13b — Setting Identity via Reality Layer
+**Date:** 2026-05-11 | **Status:** Complete
+**Edge Function:** `discover-cell` (v3, ACTIVE) | **Commits:** `f70b2a8`, `e9f63ae`
+
+**What was done:**
+- Upgraded `discover-cell` to v3 so setting discovery now ensures a Root reality `entity_copy` exists for every discovered setting
+- Procedural setting names now derive from `proc_words` categories `impl` + `source` using deterministic logic keyed by `setting_id`
+- `discover-cell` response payload now returns `copy_name` and `copy_description`
+- Backfilled existing `settings` rows into `entity_copies` for Root reality
+- `frontend/src/app.js` now resolves current setting identity from `entity_copies` instead of `settings(name)`
+- Sidebar now shows the setting's procedural name and short description in `char-position-panel`
+- Travel status messages now include the procedural setting name when entering or discovering a cell
+
+**Backfill results:**
+- `setting_id=1` → `cast bone`
+- `setting_id=2` → `etched bone`
+
+**Key decisions:**
+- Identity currently uses deterministic `setting_id` seeding instead of `copy_id`; stable now, can migrate later if multi-reality divergence needs stronger decoupling
+- Root reality remains the active display context (`reality_id=1`)
+- Truth `settings` rows remain nameless; all player-facing naming lives in `entity_copies`
+- `local_attributes` reserved for future biome metadata (for example `setting_type`)
+
+**Remaining follow-up:**
+- Grid renderer colour-coding by `setting_id` still pending
+
+---
+
+### 🔼 Next: Milestone 13c — Grid Colour-Coding by Setting
 **Status:** Not started
 
-**Goal:** Wire `discover-cell` to create `entity_copies` for newly spawned settings in the Root reality (`reality_id=1`), and derive a procedural name + description. Surface the setting's copy name in the frontend sidebar and colour-code grid cells by setting.
+**Goal:** Make setting boundaries legible at a glance by tinting rendered grid cells according to `setting_id`, while preserving entity visibility and boundary-box readability.
 
 **Scope:**
-- [ ] `discover-cell` v3: on setting spawn, INSERT into `entity_copies` (`reality_id=1`, `truth_entity_type='setting'`, `truth_entity_id=<new_id>`) with `name` derived from `proc_words` using `copy_id` as seed
-- [ ] `description` field: short procedural phrase (adj + noun pattern from `proc_words`)
-- [ ] Return `copy_name` and `copy_description` in `discover-cell` response payload
-- [ ] `app.js`: display `copy_name` in `charSettingEl` on cell entry
-- [ ] Grid renderer: colour-code cells by `setting_id` so boundaries are visually apparent
-- [ ] Backfill: INSERT `entity_copies` for existing `settings` rows (id=1 and any dynamically spawned)
-- [ ] Consider: `setting_type` enum (forest/ocean/desert/city/void) as future biome scaffold in `local_attributes`
+- [ ] `grid-renderer.js`: assign stable colour palette by `setting_id`
+- [ ] Keep contrast high enough for character/material markers and current-cell highlight
+- [ ] Preserve boundary outlines so setting regions remain readable in dense maps
+- [ ] Validate on mobile and desktop after GitHub Pages deploy
 
 ---
 
@@ -300,12 +324,12 @@ See prior entry for full details. Summary:
 | Migration 008 | `008_rls_policies_and_trigger_fix` — service_role INSERT policies + player read/update |
 | Migration 009 | `009_natural_progression_loop` — world_tick_state, proc_words, world_tick(), pg_cron |
 | Migration 010 | `010_world_seeding` — 7x7 grid_cells, entity_positions seed, seed_setting_grid(), REPLICA IDENTITY |
-| Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings (**Supabase only — needs repo sync**) |
-| Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players (**Supabase only — needs repo sync**) |
-| Migration 013 | `add_setting_discovery_fields` — max_cells + cycle_order on settings (**Supabase only — needs repo sync**) |
-| Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS (**Supabase only — needs repo sync**) |
+| Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings |
+| Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
+| Migration 013 | `013_add_setting_discovery_fields` — max_cells + cycle_order on settings |
+| Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
-| Edge Function | `discover-cell` (ID: `da7a0ccb`, v2, ACTIVE) |
+| Edge Function | `discover-cell` (ID: `da7a0ccb`, v3, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Root Reality | `reality_id=1`, `name='Root'`, `parent_reality_id=NULL` |
