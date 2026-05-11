@@ -18,6 +18,7 @@ const travelModal     = document.getElementById('travel-modal')
 const travelError     = document.getElementById('travel-error')
 const charPosXYZEl    = document.getElementById('char-pos-xyz')
 const charSettingEl   = document.getElementById('char-setting-name')
+const charSettingDescEl = document.getElementById('char-setting-desc')
 
 // Guard: onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on page load.
 let gameInitialised = false
@@ -60,7 +61,7 @@ async function loadCharPosition(characterId) {
   if (!characterId) return
   const { data, error } = await supabase
     .from('entity_positions')
-    .select('grid_cells(x, y, z, setting_id, settings(name))')
+    .select('grid_cells(x, y, z, setting_id)')
     .eq('entity_type', 'character')
     .eq('entity_id', characterId)
     .is('timestamp_end', null)
@@ -69,7 +70,18 @@ async function loadCharPosition(characterId) {
   const gc = data.grid_cells
   if (!gc) return
   charPosXYZEl.textContent = `(${gc.x}, ${gc.y}, ${gc.z})`
-  charSettingEl.textContent = gc.settings?.name ?? `S${gc.setting_id}`
+
+  // Resolve setting name from entity_copies (Root reality)
+  const { data: copy } = await supabase
+    .from('entity_copies')
+    .select('name, description')
+    .eq('reality_id', 1)
+    .eq('truth_entity_type', 'setting')
+    .eq('truth_entity_id', gc.setting_id)
+    .maybeSingle()
+
+  charSettingEl.textContent = copy?.name ?? `S${gc.setting_id}`
+  if (charSettingDescEl) charSettingDescEl.textContent = copy?.description ?? ''
 }
 
 // ─── Direction picker ───────────────────────────────────────────────
@@ -83,7 +95,7 @@ const DIR_DELTA = {
 }
 
 // Resolves (or discovers) the adjacent cell by calling the discover-cell edge function.
-// Returns { cellId, spawned, error }
+// Returns { cellId, spawned, copyName, copyDescription, error }
 async function getAdjacentCellId(direction, characterId) {
   const { data: pos, error: posErr } = await supabase
     .from('entity_positions')
@@ -92,7 +104,7 @@ async function getAdjacentCellId(direction, characterId) {
     .eq('entity_id', characterId)
     .is('timestamp_end', null)
     .single()
-  if (posErr || !pos) return { cellId: null, spawned: false, error: 'Could not find your current position.' }
+  if (posErr || !pos) return { cellId: null, spawned: false, copyName: null, copyDescription: null, error: 'Could not find your current position.' }
 
   const { dx, dy, dz } = DIR_DELTA[direction]
   const tx = (pos.grid_cells?.x ?? 0) + dx
@@ -104,10 +116,16 @@ async function getAdjacentCellId(direction, characterId) {
   })
 
   if (error || !data?.grid_cell_id) {
-    return { cellId: null, spawned: false, error: `Could not resolve cell to the ${direction}.` }
+    return { cellId: null, spawned: false, copyName: null, copyDescription: null, error: `Could not resolve cell to the ${direction}.` }
   }
 
-  return { cellId: data.grid_cell_id, spawned: data.spawned ?? false, error: null }
+  return {
+    cellId: data.grid_cell_id,
+    spawned: data.spawned ?? false,
+    copyName: data.copy_name ?? null,
+    copyDescription: data.copy_description ?? null,
+    error: null,
+  }
 }
 
 // All 6 directions are always traversable — undiscovered cells are spawned on demand.
@@ -143,18 +161,22 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
     travelError.textContent = ''
     document.querySelectorAll('.dir-btn').forEach(b => b.disabled = true)
 
-    const { cellId, spawned, error } = await getAdjacentCellId(direction, travelCharacterId)
+    const { cellId, spawned, copyName, copyDescription, error } = await getAdjacentCellId(direction, travelCharacterId)
     if (error || !cellId) {
       travelError.textContent = error || 'No cell in that direction.'
       await prevalidateDirections()
       return
     }
 
-    if (spawned) statusEl.textContent = `discovering new cell to the ${direction}…`
+    const nameLabel = copyName ? ` — ${copyName}` : ''
+    if (spawned) {
+      statusEl.textContent = `discovering new cell to the ${direction}${nameLabel}…`
+    } else {
+      statusEl.textContent = `entering ${copyName ?? `cell to the ${direction}`}…`
+    }
 
     closeTravelModal()
     setActionsDisabled(true)
-    statusEl.textContent = `travelling ${direction}…`
     try {
       await submitAction('travel', { destination_grid_cell_id: cellId })
     } catch (e) {
@@ -262,6 +284,7 @@ function showAuth() {
   playerInfoEl.textContent = '—'
   charPosXYZEl.textContent = '—'
   charSettingEl.textContent = '—'
+  if (charSettingDescEl) charSettingDescEl.textContent = ''
 }
 
 function setActionsDisabled(disabled) {
