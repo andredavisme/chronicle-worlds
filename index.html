@@ -80,6 +80,19 @@
       .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
       .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+      /* ── Character position panel ── */
+      #char-position-panel {
+        font-size: 0.72rem;
+        color: #556655;
+        line-height: 1.8;
+        border: 1px solid #1a2a1a;
+        padding: 8px 10px;
+        background: #080e08;
+      }
+      #char-position-panel .pos-label { color: #446644; }
+      #char-position-panel .pos-value { color: #88cc88; }
+      #char-position-panel .setting-name { color: #669966; font-style: italic; }
+
       #chronicle-list {
         font-size: 0.72rem; line-height: 1.6; color: #666;
         display: flex; flex-direction: column; gap: 4px;
@@ -129,6 +142,7 @@
       .dir-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
       .dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
       .dir-btn.empty { border-color: transparent; background: transparent; cursor: default; }
+      .dir-btn.no-cell { opacity: 0.25; cursor: not-allowed; border-color: #1a1a1a; }
       #travel-cancel {
         background: transparent; border: 1px solid #333; color: #555;
         padding: 6px; cursor: pointer; font-family: inherit;
@@ -159,7 +173,7 @@
         footer { padding: 6px 12px; gap: 10px; font-size: 0.65rem; }
       }
     </style>
-    <script type="module" crossorigin src="/chronicle-worlds/assets/index-DYJlKdkE.js"></script>
+    <script type="module" crossorigin src="/chronicle-worlds/assets/index-BI0dANbb.js"></script>
   </head>
   <body>
     <header>
@@ -183,6 +197,12 @@
     </div>
 
     <div id="sidebar">
+      <!-- Character position panel -->
+      <div id="char-position-panel">
+        <div><span class="pos-label">pos: </span><span class="pos-value" id="char-pos-xyz">—</span></div>
+        <div><span class="pos-label">setting: </span><span class="setting-name" id="char-setting-name">—</span></div>
+      </div>
+
       <div>
         <h2>ACTIONS</h2>
         <div id="action-panel">
