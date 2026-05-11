@@ -221,7 +221,6 @@
       <div id="travel-modal-inner">
         <h3>CHOOSE DIRECTION</h3>
         <p id="travel-error"></p>
-        <!-- compass layout: Up top-right, Down bottom-left; N/S/E/W in cross -->
         <div class="dir-grid">
           <button class="dir-btn empty" disabled></button>
           <button class="dir-btn" data-dir="north">N</button>
@@ -269,6 +268,10 @@
       const signOutBtn      = document.getElementById('auth-sign-out')
       const travelModal     = document.getElementById('travel-modal')
       const travelError     = document.getElementById('travel-error')
+
+      // Guard: prevent showGame from subscribing channels more than once per page load.
+      // onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on first load.
+      let gameInitialised = false
 
       // ─── Grid renderer ───────────────────────────────────────────────
       let ctx, entities = []
@@ -337,10 +340,7 @@
         down:  { dx:  0, dy:  0, dz: -1 },
       }
 
-      // Returns the grid_cell_id of the cell adjacent in `direction` to
-      // the current player character, or null if no such cell exists.
       async function getAdjacentCellId(direction, characterId) {
-        // 1. Find actor's current grid cell
         const { data: pos, error: posErr } = await sb
           .from('entity_positions')
           .select('grid_cell_id, grid_cells(x, y, z)')
@@ -348,21 +348,16 @@
           .eq('entity_id', characterId)
           .is('timestamp_end', null)
           .single()
-
         if (posErr || !pos) return { cellId: null, error: 'Could not find your current position.' }
-
         const { dx, dy, dz } = DIR_DELTA[direction]
         const tx = (pos.grid_cells?.x ?? 0) + dx
         const ty = (pos.grid_cells?.y ?? 0) + dy
         const tz = (pos.grid_cells?.z ?? 0) + dz
-
-        // 2. Look up target cell
         const { data: cell, error: cellErr } = await sb
           .from('grid_cells')
           .select('grid_cell_id')
           .eq('x', tx).eq('y', ty).eq('z', tz)
           .single()
-
         if (cellErr || !cell) return { cellId: null, error: `No cell exists to the ${direction}.` }
         return { cellId: cell.grid_cell_id, error: null }
       }
@@ -370,7 +365,7 @@
       // ─── Travel modal ─────────────────────────────────────────────────
       let travelCharacterId = null
 
-      async function openTravelModal(characterId) {
+      function openTravelModal(characterId) {
         travelCharacterId = characterId
         travelError.textContent = ''
         travelModal.classList.add('open')
@@ -383,8 +378,6 @@
       }
 
       document.getElementById('travel-cancel').addEventListener('click', closeTravelModal)
-
-      // Close on backdrop click
       travelModal.addEventListener('click', e => { if (e.target === travelModal) closeTravelModal() })
 
       document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
@@ -392,14 +385,12 @@
           const direction = btn.dataset.dir
           travelError.textContent = ''
           document.querySelectorAll('.dir-btn').forEach(b => b.disabled = true)
-
           const { cellId, error } = await getAdjacentCellId(direction, travelCharacterId)
           if (error || !cellId) {
             travelError.textContent = error || 'No cell in that direction.'
             document.querySelectorAll('.dir-btn[data-dir]').forEach(b => b.disabled = false)
             return
           }
-
           closeTravelModal()
           setActionsDisabled(true)
           statusEl.textContent = `travelling ${direction}…`
@@ -517,21 +508,25 @@
       // ─── Auth state machine ──────────────────────────────────────────
       sb.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) showGame(session.user)
-        else               showAuth()
+        else { gameInitialised = false; showAuth() }
       })
 
       async function showGame(user) {
+        // Show UI immediately on every auth event (handles tab restore etc.)
         authPanel.style.display = 'none'; gameArea.style.display = 'block'
         sidebar.style.display = 'flex'; signOutBtn.style.display = 'inline-block'
         statusEl.textContent     = `connected as ${user.email}`
         playerInfoEl.textContent = `player: ${user.id.slice(0, 8)}…`
+
+        // Only run heavy init (channels, renderer, data fetch) once per page load
+        if (gameInitialised) return
+        gameInitialised = true
 
         initGridRenderer()
         await loadEntityPositions()
         await loadChronicle()
         await loadWorldTime()
 
-        // Resolve player's controlled character id for travel
         let characterId = null
         const { data: playerRow } = await sb
           .from('players')
@@ -545,7 +540,6 @@
           btn.parentNode.replaceChild(fresh, btn)
           fresh.addEventListener('click', async () => {
             if (fresh.dataset.action === 'travel') {
-              // Travel opens the direction picker instead of submitting immediately
               if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
               openTravelModal(characterId)
               return
@@ -571,8 +565,7 @@
           .on('postgres_changes',
               { event: 'UPDATE', schema: 'public', table: 'world_tick_state' },
               (payload) => {
-                const du = payload.new?.duration_unit
-                statusEl.textContent = `connected as ${user.email} · du: ${du}`
+                statusEl.textContent = `connected as ${user.email} · du: ${payload.new?.duration_unit}`
                 loadWorldTime()
               })
           .subscribe()
