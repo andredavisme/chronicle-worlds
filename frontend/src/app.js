@@ -30,7 +30,6 @@ const targetEmpty         = document.getElementById('target-empty')
 const targetAmountRow     = document.getElementById('target-amount-row')
 const targetAmountInput   = document.getElementById('target-amount')
 
-// Guard: onAuthStateChange fires for both INITIAL_SESSION and SIGNED_IN on page load.
 let gameInitialised = false
 
 // ─── Auth UI ────────────────────────────────────────────────────────
@@ -107,7 +106,6 @@ async function getCharacterCellId(characterId) {
 }
 
 // ─── Get other characters sharing the same grid cell ────────────
-// Returns array of { character_id, health, wealth, inspiration }
 async function getColocatedCharacters(actorCharacterId) {
   const cellId = await getCharacterCellId(actorCharacterId)
   if (!cellId) return []
@@ -145,7 +143,6 @@ const ACTION_LABELS = {
 
 let targetResolve = null
 
-// Returns { target_character_id, wealth_amount? } on selection, or null on cancel.
 function openTargetModal(action, actorCharacterId, colocated) {
   return new Promise((resolve) => {
     targetResolve = resolve
@@ -178,7 +175,6 @@ function openTargetModal(action, actorCharacterId, colocated) {
           const amount = action === 'exchange_material'
             ? Math.max(1, parseInt(targetAmountInput.value, 10) || 1)
             : undefined
-          // close WITHOUT firing null — selection is the resolution
           closeTargetModal(false)
           resolve({ target_character_id: char.character_id, wealth_amount: amount })
         })
@@ -190,8 +186,6 @@ function openTargetModal(action, actorCharacterId, colocated) {
   })
 }
 
-// cancel=true  → user dismissed without selecting; resolve promise with null
-// cancel=false → called by a target button after it resolves the promise itself; just hide
 function closeTargetModal(cancel = true) {
   targetModal.classList.remove('open')
   targetError.textContent = ''
@@ -337,7 +331,8 @@ async function showGame(user) {
   await loadCharPosition(characterId)
 
   initTurnManager({
-    onCooldown: (sec) => { cooldownEl.textContent = sec > 0 ? `cooldown: ${sec}s` : '' },
+    onCooldown:  (sec) => { cooldownEl.textContent = sec > 0 ? `cooldown: ${sec}s` : '' },
+    onDisabled:  (disabled) => setActionsDisabled(disabled),
     onResult: (result) => {
       if (result.status === 'resolved') {
         turnInfoEl.textContent = `last turn: ${result.event?.turn_number ?? '?'}`
@@ -352,14 +347,12 @@ async function showGame(user) {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action
 
-      // ── Travel: open direction picker ──
       if (action === 'travel') {
         if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
         await openTravelModal(characterId)
         return
       }
 
-      // ── exchange_information: self-submit, no target needed ──
       if (action === 'exchange_information') {
         setActionsDisabled(true)
         statusEl.textContent = 'exchanging information…'
@@ -371,7 +364,6 @@ async function showGame(user) {
         return
       }
 
-      // ── Actions requiring a target character in the same cell ──
       if (TARGET_ACTIONS.has(action)) {
         if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
 
@@ -392,7 +384,6 @@ async function showGame(user) {
 
         const result = await openTargetModal(action, characterId, colocated)
 
-        // null = cancelled
         if (!result) return
 
         const { target_character_id, wealth_amount } = result
