@@ -92,16 +92,45 @@ See prior entry for full details. Summary:
 
 ---
 
-### 🔼 Next: Milestone 12 — Character Position Display + Current Cell UI
+### ✅ Milestone 12 — World Discovery System
+**Date:** 2026-05-10 | **Status:** Complete
+**Migration:** `add_setting_discovery_fields` | **Edge Function:** `discover-cell` (v2, ACTIVE) | **Commit:** `ce3a49f`
+
+**What was done:**
+- Added `max_cells` (integer, random ceiling 7–20 per setting) and `cycle_order` (unique integer) to `settings` table
+- Deployed `discover-cell` Edge Function — called by the client on every movement attempt instead of querying `grid_cells` directly
+- `app.js` `getAdjacentCellId()` rewritten to invoke `discover-cell` with `{ x, y, z, from_cell_id }`
+- `prevalidateDirections()` simplified — all 6 directions always enabled; undiscovered cells spawn on demand
+- Status bar shows `"discovering new cell to the [dir]…"` on first entry to an unvisited cell (`spawned: true` in response)
+- CORS headers added to Edge Function (v2) to unblock calls from `andredavisme.github.io`
+
+**Discovery logic (in Edge Function):**
+| Scenario | Cell assigned to |
+|---|---|
+| Cell already exists | Returned immediately, no insert |
+| Travel, previous setting has room | Same setting as origin cell |
+| Travel, previous setting full (`count >= max_cells`) | Next setting in `cycle_order` |
+| No next setting exists | New setting spawned dynamically (cycle_order+1, random max_cells 7–20) |
+| Entity spawn, no travel context | Random existing setting (or new one if none) |
+
+**Key decisions:**
+- `from_cell_id` is the travel context signal — omitting it triggers random-setting assignment
+- Settings are spawned dynamically with `time_unit: 0` as placeholder; world content seeded later via `world_tick()` or future milestone
+- `UNIQUE INDEX` on `cycle_order` enforces deterministic cycle progression
+
+---
+
+### 🔼 Next: Milestone 13 — Setting Identity + World Content
 **Status:** Not started
 
-**Goal:** Show the player their character's current grid position (x, y, z) and setting in the sidebar, and highlight their character's cell on the isometric canvas.
+**Goal:** Newly discovered settings should have meaningful identity — names, time units, and visual distinction in the grid renderer. Currently spawned settings have `time_unit: 0` and no name.
 
 **Scope:**
-- [ ] Sidebar: add a `#char-position` element showing `pos: (x, y, z)` updated on each `entity_positions` Realtime event
-- [ ] Grid renderer: highlight the local player's character cell with a distinct ring/glow vs. other entities
-- [ ] Footer or sidebar: show current setting name alongside world time
-- [ ] Direction picker: grey out / disable direction buttons for directions where no adjacent cell exists (pre-validate all 6 directions on modal open)
+- [ ] Assign procedural names to spawned settings using `proc_words` vocabulary
+- [ ] Assign a non-zero `time_unit` to spawned settings (random range or biome-based)
+- [ ] Grid renderer: colour-code cells by `setting_id` so setting boundaries are visually apparent
+- [ ] Sidebar: display current setting name when character enters a new cell (`charSettingEl` already wired)
+- [ ] Consider: `setting_type` enum (forest / ocean / desert / city / void) as a scaffold for future biome rules
 
 ---
 
@@ -151,6 +180,44 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 
 ---
 
+### 💡 Idea 4 — Text-Based Command Mode
+
+**Concept:** A toggle switch in the UI lets players switch between the current button-driven interface and a text command input. Both modes submit the same underlying actions — text mode is an alternate input layer, not a separate system.
+
+**Design considerations:**
+- Toggle switch persists preference to `localStorage` so it survives page refresh
+- When text mode is active, the action buttons and travel modal are hidden; a single `<input>` + submit button appear instead
+- Parser is client-side only — no backend changes needed
+- Commands map directly to existing `submitAction()` calls
+
+**Command Dictionary (draft):**
+
+| Command | Aliases | Action | Notes |
+|---|---|---|---|
+| `go north` | `go n`, `move north`, `n` | `travel` → N | Also: `s`, `e`, `w`, `up`, `down` |
+| `go south` | `go s`, `s` | `travel` → S | |
+| `go east` | `go e`, `e` | `travel` → E | |
+| `go west` | `go w`, `w` | `travel` → W | |
+| `go up` | `up`, `u`, `ascend` | `travel` → Up | |
+| `go down` | `down`, `d`, `descend` | `travel` → Down | |
+| `rest` | `wait`, `idle` | `rest` | |
+| `talk` | `exchange info`, `speak` | `exchange_info` | Future: optional target |
+| `fight` | `attack`, `conflict` | `introduce_conflict` | Future: optional target |
+| `resolve` | `resolve conflict` | `resolve_conflict` | |
+| `trade` | `exchange material`, `give` | `exchange_material` | Future: optional item |
+| `look` | `l`, `examine` | (no action) | Prints current cell info to status bar |
+| `help` | `?`, `commands` | (no action) | Prints command list to status bar |
+
+**Implementation path:**
+1. Add toggle switch to `frontend/index.html` sidebar
+2. Toggle handler in `app.js` shows/hides button panel vs. text input
+3. `parseCommand(input)` function — trims, lowercases, matches against alias table, calls `submitAction()` or `openTravelModal()` appropriately
+4. Travel commands bypass the modal entirely — `parseCommand('go north')` calls `getAdjacentCellId('north', characterId)` and submits directly
+5. `look` and `help` are local-only: write to `statusEl` without a server round-trip
+6. Unknown input: `statusEl.textContent = 'unknown command — type "help" for a list'`
+
+---
+
 ## Quick Reference
 
 | Item | Value |
@@ -173,7 +240,9 @@ Unscheduled design ideas to revisit when relevant milestones are reached. Not co
 | Migration 010 | `010_world_seeding` — 7x7 grid_cells, entity_positions seed, seed_setting_grid(), REPLICA IDENTITY |
 | Migration 011 | `011_public_read_world_state` — SELECT policies on world_tick_state + settings |
 | Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
+| Migration 013 | `add_setting_discovery_fields` — max_cells + cycle_order on settings |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v3, ACTIVE) |
+| Edge Function | `discover-cell` (ID: `da7a0ccb`, v2, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Genesis seed | `settings` row `id=1`, `origin=(0,0,0)`, `grid_cells` 7x7 seeded |
