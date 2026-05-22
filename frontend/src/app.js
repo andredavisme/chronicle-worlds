@@ -72,12 +72,14 @@ function cmdLog(text, type = 'info') {
 }
 
 const HELP_TEXT = [
-  '  go n/s/e/w/up/down  — travel',
+  '  go n/s/e/w          — travel horizontally',
+  '  fly / go up         — travel to z+1 (requires flight)',
+  '  dive / go down      — travel to z-1',
   '  talk                — exchange information',
   '  fight               — introduce conflict',
   '  resolve             — resolve conflict',
   '  trade [amount]      — exchange material',
-  '  look                — show current position',
+  '  look                — show current position + z-layer',
   '  help                — show this list',
 ]
 
@@ -88,7 +90,9 @@ const TRAVEL_ALIASES = {
   e: 'east',  east: 'east',   'go e': 'east',  'go east': 'east',
   w: 'west',  west: 'west',   'go w': 'west',  'go west': 'west',
   u: 'up',    up: 'up',       ascend: 'up',    'go up': 'up',    'go u': 'up',
+  fly: 'up',  soar: 'up',     'go fly': 'up',
   d: 'down',  down: 'down',   descend: 'down', 'go down': 'down', 'go d': 'down',
+  dive: 'down', sink: 'down', 'go dive': 'down',
 }
 
 // Returns { type, direction?, action?, amount? } or null for unknown
@@ -124,8 +128,6 @@ function parseCommand(raw) {
 }
 
 // ─── Stat delta display ──────────────────────────────────────────
-// Formats a stat_deltas object from the Edge Function response into a
-// human-readable string, e.g. "inspiration +3" or "health -3 (char #7)"
 function formatStatDeltas(statDeltas) {
   if (!statDeltas?.length) return null
   return statDeltas
@@ -135,6 +137,16 @@ function formatStatDeltas(statDeltas) {
       return `${d.attribute} ${sign}${d.delta}${target}`
     })
     .join(' · ')
+}
+
+// ─── z-layer label lookup (inline, no Edge Function needed) ──────
+async function getZLayerLabel(z) {
+  const { data } = await supabase
+    .from('z_properties')
+    .select('layer_name')
+    .eq('z_layer', z)
+    .single()
+  return data?.layer_name ?? null
 }
 
 // ─── Auth UI ────────────────────────────────────────────────────────
@@ -566,11 +578,24 @@ async function showGame(user) {
       if (parsed.local === 'help') {
         HELP_TEXT.forEach(line => cmdLog(line, 'info'))
       } else if (parsed.local === 'look') {
-        const pos = charPosXYZEl.textContent
+        const pos     = charPosXYZEl.textContent
         const setting = charSettingEl.textContent
-        const desc = charSettingDescEl?.textContent ?? ''
+        const desc    = charSettingDescEl?.textContent ?? ''
         cmdLog(`pos: ${pos}  setting: ${setting}`, 'info')
         if (desc) cmdLog(`  ${desc}`, 'info')
+        // Inline z-layer label lookup
+        const { data: posData } = await supabase
+          .from('entity_positions')
+          .select('grid_cells(z)')
+          .eq('entity_type', 'character')
+          .eq('entity_id', characterId)
+          .is('timestamp_end', null)
+          .single()
+        const z = posData?.grid_cells?.z
+        if (z !== undefined && z !== null) {
+          const label = await getZLayerLabel(z)
+          cmdLog(`  layer: ${label ?? 'unknown'} (z=${z})`, 'info')
+        }
       } else if (parsed.local === 'rest') {
         cmdLog('you rest. the world ticks on.', 'info')
       }
