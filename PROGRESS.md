@@ -361,14 +361,70 @@ See prior entry for full details. Summary:
 
 ---
 
+### ✅ Milestone 19 — Text Command Mode (Option B)
+**Date:** 2026-05-11 | **Status:** Complete
+**Files:** `frontend/index.html`, `frontend/src/app.js`
+
+**What was done:**
+
+**`frontend/index.html`:**
+- Added `#mode-toggle-row` with two `.mode-btn` buttons: `BUTTONS` (default active) and `TEXT`
+- Added `#cmd-panel` (hidden by default, shown with `.visible` class) containing:
+  - `#cmd-history`: scrollable output pane, min 100px / max 180px, seeded with `type "help" for commands`
+  - `#cmd-input-row`: text input + submit button (`↵`)
+- Full CSS for mode toggle row, cmd panel, cmd history, `.cmd-line` variants (`echo`, `err`, `info`), cmd input, and submit button
+- Both modes share the same sidebar section under the `ACTIONS` header
+
+**`frontend/src/app.js`:**
+- `currentMode` state (`'buttons'` | `'text'`), toggled by `setMode(mode)`
+- `setMode('text')`: hides `#action-panel`, shows `#cmd-panel`, focuses `#cmd-input`
+- `setMode('buttons')`: shows `#action-panel`, hides `#cmd-panel`
+- `cmdLog(text, type)`: appends a `.cmd-line` div to `#cmd-history`, auto-scrolls to bottom
+- `HELP_TEXT`: static array of command hints printed by `help`
+- `TRAVEL_ALIASES`: flat alias map (e.g. `'go n'`, `'n'`, `'north'` all resolve to `'north'`)
+- `parseCommand(raw)`: trims/lowercases, returns `{ type, direction? }` / `{ type, action, amount? }` / `{ type, local }` / `null`
+- `handleCommand(raw)`: echoes input, calls `parseCommand`, routes:
+  - `local/help` → prints `HELP_TEXT` lines via `cmdLog`
+  - `local/look` → reads `charPosXYZEl` + `charSettingEl` + `charSettingDescEl`, prints via `cmdLog`
+  - `local/rest` → prints `you rest. the world ticks on.`
+  - `travel` → calls `executeAction('travel', characterId, user, { direction })` — bypasses compass modal entirely
+  - `action` → calls `executeAction(parsed.action, characterId, user, { amount })` — opens target modal for targeted actions
+  - `null` (unknown) → `cmdLog('unknown command — type "help" for a list', 'err')`
+- `cmdSubmit` click and `cmdInput` Enter both call `handleCommand`
+- `setActionsDisabled` extended to also disable `#cmd-submit` during cooldown
+- `executeAction('travel', ..., { direction })` path: resolves cell via `getAdjacentCellId`, submits directly, returns `{ ok, copyName }` for inline log
+- `trade [amount]` regex: `^(?:trade|exchange material|give)(?:\s+(\d+))?$` — parses optional inline amount, pre-fills target modal
+
+**Command dictionary (live):**
+| Command | Aliases | Action |
+|---|---|---|
+| `go north` | `go n`, `n`, `north` | `travel` → N |
+| `go south` | `go s`, `s`, `south` | `travel` → S |
+| `go east`  | `go e`, `e`, `east`  | `travel` → E |
+| `go west`  | `go w`, `w`, `west`  | `travel` → W |
+| `go up`    | `up`, `u`, `ascend`  | `travel` → Up |
+| `go down`  | `down`, `d`, `descend` | `travel` → Down |
+| `talk`     | `exchange info`, `exchange information`, `speak` | `exchange_information` |
+| `fight`    | `attack`, `conflict`, `introduce conflict` | `introduce_conflict` |
+| `resolve`  | `resolve conflict` | `resolve_conflict` |
+| `trade [N]` | `exchange material [N]`, `give [N]` | `exchange_material` (amount optional) |
+| `look`     | `l`, `examine` | (local) print pos + setting |
+| `help`     | `?`, `commands` | (local) print command list |
+| `rest`     | `wait`, `idle` | (local) flavour only |
+
+**Key decisions:**
+- Text mode is a **pure input layer** — all calls route through the same `submitAction()` / `executeAction()` pipeline as button mode; no parallel code paths
+- Travel commands bypass the compass modal — direction is resolved programmatically via `getAdjacentCellId`
+- Targeted actions (`fight`, `resolve`, `trade`) still open the target picker modal in text mode — no inline target syntax (deferred)
+- `look` and `help` are **local only** — no server round-trip, no cooldown interaction
+- `rest` is flavour-only at this stage — no action submitted (rest as a real action deferred)
+- `#cmd-submit` disabled during cooldown alongside `.action-btn` elements via `setActionsDisabled`
+
+---
+
 ## 🔼 Next Milestone Candidates
 
-Choose one to tackle next:
-
-### Option B — Text Command Mode ⭐ (recommended next)
-Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
-
-### Option F — Vertical z-Axis Physical Mechanics
+### Option F — Vertical z-Axis Physical Mechanics ⭐ (recommended next)
 Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. `seed_setting_grid()` gains `z_layers` param. Height advantage modifier on conflict actions.
 
 ---
@@ -388,38 +444,6 @@ Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. 
 - Water: `z=-1` and below; requires `buoyancy`/`breath`; accelerated material decay
 - Height advantage: higher z → attribute modifier bonus on conflict actions
 - No schema changes needed; z>0 cells seeded on structure spawn; Up/Down already wired
-
----
-
-### 💡 Idea 4 — Text-Based Command Mode
-
-**Concept:** Toggle between button UI and text command input. Same underlying `submitAction()` calls — text mode is an alternate input layer only.
-
-**Command Dictionary (draft):**
-
-| Command | Aliases | Action |
-|---|---|---|
-| `go north` | `go n`, `n` | `travel` → N |
-| `go south` | `go s`, `s` | `travel` → S |
-| `go east` | `go e`, `e` | `travel` → E |
-| `go west` | `go w`, `w` | `travel` → W |
-| `go up` | `up`, `u`, `ascend` | `travel` → Up |
-| `go down` | `down`, `d`, `descend` | `travel` → Down |
-| `rest` | `wait`, `idle` | `rest` |
-| `talk` | `exchange info`, `speak` | `exchange_info` |
-| `fight` | `attack`, `conflict` | `introduce_conflict` |
-| `resolve` | `resolve conflict` | `resolve_conflict` |
-| `trade` | `exchange material`, `give` | `exchange_material` |
-| `look` | `l`, `examine` | (local) print cell info |
-| `help` | `?`, `commands` | (local) print command list |
-
-**Implementation path:**
-1. Toggle switch in `frontend/index.html` sidebar
-2. Toggle handler shows/hides button panel vs. text input
-3. `parseCommand(input)` — trims, lowercases, matches alias table, calls `submitAction()` or `openTravelModal()`
-4. Travel commands bypass modal entirely
-5. `look` and `help` write to `statusEl` without server round-trip
-6. Unknown input: `statusEl.textContent = 'unknown command — type "help" for a list'`
 
 ---
 
