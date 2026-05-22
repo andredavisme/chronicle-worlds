@@ -122,7 +122,7 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  let body: { x: number; y: number; z: number; from_cell_id?: number };
+  let body: { x: number; y: number; z: number; from_cell_id?: number; vertical?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -162,7 +162,9 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // 2. Determine which setting to assign (needed before scaffold check)
+  // 2. Determine which setting to assign.
+  //    Vertical travel (up/down) always stays in the origin setting — ignore max_cells.
+  //    Horizontal travel uses the overflow / cycle logic.
   let setting_id: number;
 
   if (from_cell_id) {
@@ -175,21 +177,27 @@ Deno.serve(async (req: Request) => {
     const candidate_setting_id = fromCell?.setting_id;
 
     if (candidate_setting_id) {
-      const { data: setting } = await supabase
-        .from("settings")
-        .select("setting_id, max_cells, cycle_order")
-        .eq("setting_id", candidate_setting_id)
-        .single();
-
-      const { count } = await supabase
-        .from("grid_cells")
-        .select("grid_cell_id", { count: "exact", head: true })
-        .eq("setting_id", candidate_setting_id);
-
-      if (setting && count !== null && count < setting.max_cells) {
+      if (body.vertical === true) {
+        // Vertical: always stay in the same setting regardless of max_cells
         setting_id = candidate_setting_id;
       } else {
-        setting_id = await getOrCreateNextSetting(setting?.cycle_order ?? 1);
+        // Horizontal: respect max_cells and cycle to next setting if full
+        const { data: setting } = await supabase
+          .from("settings")
+          .select("setting_id, max_cells, cycle_order")
+          .eq("setting_id", candidate_setting_id)
+          .single();
+
+        const { count } = await supabase
+          .from("grid_cells")
+          .select("grid_cell_id", { count: "exact", head: true })
+          .eq("setting_id", candidate_setting_id);
+
+        if (setting && count !== null && count < setting.max_cells) {
+          setting_id = candidate_setting_id;
+        } else {
+          setting_id = await getOrCreateNextSetting(setting?.cycle_order ?? 1);
+        }
       }
     } else {
       setting_id = await getOrCreateRandomSetting();

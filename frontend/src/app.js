@@ -45,7 +45,7 @@ const cmdHistory     = document.getElementById('cmd-history')
 let gameInitialised = false
 let currentMode = 'buttons' // 'buttons' | 'text'
 
-// ─── Mode toggle ─────────────────────────────────────────────────
+// ─── Mode toggle ──────────────────────────────────────────────────────────────
 function setMode(mode) {
   currentMode = mode
   if (mode === 'text') {
@@ -65,7 +65,7 @@ function setMode(mode) {
 modeBtnButtons.addEventListener('click', () => setMode('buttons'))
 modeBtnText.addEventListener('click',    () => setMode('text'))
 
-// ─── Command history helpers ──────────────────────────────────────
+// ─── Command history helpers ───────────────────────────────────────────────────
 function cmdLog(text, type = 'info') {
   const line = document.createElement('div')
   line.className = `cmd-line ${type}`
@@ -86,7 +86,7 @@ const HELP_TEXT = [
   '  help                — show this list',
 ]
 
-// ─── Command parser ───────────────────────────────────────────────
+// ─── Command parser ───────────────────────────────────────────────────────────
 const TRAVEL_ALIASES = {
   n: 'north', north: 'north', 'go n': 'north', 'go north': 'north',
   s: 'south', south: 'south', 'go s': 'south', 'go south': 'south',
@@ -130,7 +130,7 @@ function parseCommand(raw) {
   return null
 }
 
-// ─── Stat delta display ──────────────────────────────────────────
+// ─── Stat delta display ────────────────────────────────────────────────────────
 function formatStatDeltas(statDeltas) {
   if (!statDeltas?.length) return null
   return statDeltas
@@ -142,7 +142,7 @@ function formatStatDeltas(statDeltas) {
     .join(' · ')
 }
 
-// ─── z-layer label lookup (inline, no Edge Function needed) ──────
+// ─── z-layer label lookup ──────────────────────────────────────────────────────
 async function getZLayerLabel(z) {
   const { data } = await supabase
     .from('z_properties')
@@ -152,7 +152,7 @@ async function getZLayerLabel(z) {
   return data?.layer_name ?? null
 }
 
-// ─── Auth UI ────────────────────────────────────────────────────────
+// ─── Auth UI ───────────────────────────────────────────────────────────────────
 document.getElementById('auth-sign-in').addEventListener('click', async () => {
   const email    = document.getElementById('auth-email').value
   const password = document.getElementById('auth-password').value
@@ -178,14 +178,14 @@ onAuthChange(async (event, session) => {
   else { gameInitialised = false; showAuth() }
 })
 
-// ─── World time ──────────────────────────────────────────────────
+// ─── World time ────────────────────────────────────────────────────────────────
 async function loadWorldTime() {
   const { data: tick }    = await supabase.from('world_tick_state').select('duration_unit').eq('id', 1).single()
   const { data: setting } = await supabase.from('settings').select('time_unit').eq('setting_id', 1).single()
   if (tick && setting) worldTimeEl.textContent = `tu: ${setting.time_unit} · du: ${tick.duration_unit}`
 }
 
-// ─── Character position UI ──────────────────────────────────────
+// ─── Character position UI ─────────────────────────────────────────────────────
 async function loadCharPosition(characterId) {
   if (!characterId) return
   const { data, error } = await supabase
@@ -212,7 +212,7 @@ async function loadCharPosition(characterId) {
   if (charSettingDescEl) charSettingDescEl.textContent = copy?.description ?? ''
 }
 
-// ─── Get current grid_cell_id for a character ───────────────────
+// ─── Get current grid_cell_id for a character ──────────────────────────────────
 async function getCharacterCellId(characterId) {
   const { data, error } = await supabase
     .from('entity_positions')
@@ -225,7 +225,7 @@ async function getCharacterCellId(characterId) {
   return data.grid_cell_id
 }
 
-// ─── Get other characters sharing the same grid cell ────────────
+// ─── Get other characters sharing the same grid cell ──────────────────────────
 async function getColocatedCharacters(actorCharacterId) {
   const cellId = await getCharacterCellId(actorCharacterId)
   if (!cellId) return []
@@ -251,7 +251,7 @@ async function getColocatedCharacters(actorCharacterId) {
   return chars
 }
 
-// ─── Target modal ────────────────────────────────────────────────
+// ─── Target modal ──────────────────────────────────────────────────────────────
 
 const TARGET_ACTIONS = new Set(['introduce_conflict', 'resolve_conflict', 'exchange_material'])
 
@@ -321,7 +321,7 @@ function closeTargetModal(cancel = true) {
 document.getElementById('target-cancel').addEventListener('click', () => closeTargetModal(true))
 targetModal.addEventListener('click', e => { if (e.target === targetModal) closeTargetModal(true) })
 
-// ─── Direction picker ───────────────────────────────────────────────
+// ─── Direction picker ──────────────────────────────────────────────────────────
 const DIR_DELTA = {
   north: { dx:  0, dy: -1, dz:  0 },
   south: { dx:  0, dy:  1, dz:  0 },
@@ -347,10 +347,13 @@ async function getAdjacentCellId(direction, characterId) {
   const tz = (pos.grid_cells?.z ?? 0) + dz
 
   const { data, error } = await supabase.functions.invoke('discover-cell', {
-    body: { x: tx, y: ty, z: tz, from_cell_id: pos.grid_cell_id }
+    body: { x: tx, y: ty, z: tz, from_cell_id: pos.grid_cell_id, vertical: dz !== 0 }
   })
 
   if (error || !data?.grid_cell_id) {
+    if (data?.blocked) {
+      return { cellId: null, spawned: false, copyName: null, copyDescription: null, error: data.reason }
+    }
     return { cellId: null, spawned: false, copyName: null, copyDescription: null, error: `Could not resolve cell to the ${direction}.` }
   }
 
@@ -420,7 +423,7 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
   })
 })
 
-// ─── Shared executeAction (used by both button and text modes) ────
+// ─── Shared executeAction (used by both button and text modes) ─────────────────
 async function executeAction(action, characterId, user, opts = {}) {
   if (action === 'travel') {
     if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
@@ -508,7 +511,7 @@ async function executeAction(action, characterId, user, opts = {}) {
   }
 }
 
-// ─── showGame ─────────────────────────────────────────────────────
+// ─── showGame ──────────────────────────────────────────────────────────────────
 async function showGame(user) {
   authPanel.style.display  = 'none'
   gameArea.style.display   = 'block'
