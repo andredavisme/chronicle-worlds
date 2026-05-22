@@ -311,6 +311,7 @@
       <!-- Character position panel -->
       <div id="char-position-panel">
         <div><span class="pos-label">pos: </span><span class="pos-value" id="char-pos-xyz">—</span></div>
+        <div><span class="pos-label">layer: </span><span class="pos-value" id="z-layer-display">—</span></div>
         <div><span class="pos-label">setting: </span><span class="setting-name" id="char-setting-name">—</span></div>
         <div id="char-setting-desc"></div>
       </div>
@@ -357,11 +358,11 @@
         <div class="dir-grid">
           <button class="dir-btn empty" disabled></button>
           <button class="dir-btn" data-dir="north">N</button>
-          <button class="dir-btn" data-dir="up">&#x25B2; Up</button>
+          <button class="dir-btn" data-dir="up" data-requires-flight="true" title="fly ↑ — requires flight">fly &#x25B2;</button>
           <button class="dir-btn" data-dir="west">W</button>
           <button class="dir-btn empty" disabled>&#x25CF;</button>
           <button class="dir-btn" data-dir="east">E</button>
-          <button class="dir-btn" data-dir="down">&#x25BC; Dn</button>
+          <button class="dir-btn" data-dir="down" title="dive ↓">dive &#x25BC;</button>
           <button class="dir-btn" data-dir="south">S</button>
           <button class="dir-btn empty" disabled></button>
         </div>

@@ -22,6 +22,7 @@ const travelError     = document.getElementById('travel-error')
 const charPosXYZEl    = document.getElementById('char-pos-xyz')
 const charSettingEl   = document.getElementById('char-setting-name')
 const charSettingDescEl = document.getElementById('char-setting-desc')
+const zLayerDisplayEl = document.getElementById('z-layer-display')
 
 // Target modal elements
 const targetModal         = document.getElementById('target-modal')
@@ -199,6 +200,10 @@ async function loadCharPosition(characterId) {
   const gc = data.grid_cells
   if (!gc) return
   charPosXYZEl.textContent = `(${gc.x}, ${gc.y}, ${gc.z})`
+
+  // Populate z-layer display
+  const zLabel = await getZLayerLabel(gc.z)
+  if (zLayerDisplayEl) zLayerDisplayEl.textContent = zLabel ? `${zLabel} (z=${gc.z})` : `z=${gc.z}`
 
   const { data: copy } = await supabase
     .from('entity_copies')
@@ -380,6 +385,26 @@ async function openTravelModal(characterId) {
   travelError.textContent = ''
   travelModal.classList.add('open')
   await prevalidateDirections()
+
+  // Gate the Up (fly) button on the character's flight attribute
+  const upBtn = document.querySelector('.dir-btn[data-requires-flight="true"]')
+  if (upBtn) {
+    const { data: char } = await supabase
+      .from('characters')
+      .select('flight')
+      .eq('character_id', characterId)
+      .single()
+    const hasFlight = char?.flight != null ? Number(char.flight) > 0 : false
+    if (!hasFlight) {
+      upBtn.classList.add('no-cell')
+      upBtn.disabled = true
+      upBtn.title = 'fly ↑ — requires flight attribute'
+    } else {
+      upBtn.classList.remove('no-cell')
+      upBtn.disabled = false
+      upBtn.title = 'fly ↑'
+    }
+  }
 }
 
 function closeTravelModal() {
@@ -430,6 +455,19 @@ async function executeAction(action, characterId, user, opts = {}) {
     if (getCooldownRemaining() > 0) return
 
     if (opts.direction) {
+      // Gate flight check for up direction in text mode
+      if (opts.direction === 'up') {
+        const { data: char } = await supabase
+          .from('characters')
+          .select('flight')
+          .eq('character_id', characterId)
+          .single()
+        const hasFlight = char?.flight != null ? Number(char.flight) > 0 : false
+        if (!hasFlight) {
+          return { error: 'fly ↑ requires flight attribute' }
+        }
+      }
+
       setActionsDisabled(true)
       const { cellId, spawned, copyName, error } = await getAdjacentCellId(opts.direction, characterId)
       if (error || !cellId) {
@@ -581,20 +619,10 @@ async function showGame(user) {
         const pos     = charPosXYZEl.textContent
         const setting = charSettingEl.textContent
         const desc    = charSettingDescEl?.textContent ?? ''
+        const layer   = zLayerDisplayEl?.textContent ?? ''
         cmdLog(`pos: ${pos}  setting: ${setting}`, 'info')
-        if (desc) cmdLog(`  ${desc}`, 'info')
-        const { data: posData } = await supabase
-          .from('entity_positions')
-          .select('grid_cells(z)')
-          .eq('entity_type', 'character')
-          .eq('entity_id', characterId)
-          .is('timestamp_end', null)
-          .single()
-        const z = posData?.grid_cells?.z
-        if (z !== undefined && z !== null) {
-          const label = await getZLayerLabel(z)
-          cmdLog(`  layer: ${label ?? 'unknown'} (z=${z})`, 'info')
-        }
+        if (layer) cmdLog(`  layer: ${layer}`, 'info')
+        if (desc)  cmdLog(`  ${desc}`, 'info')
       } else if (parsed.local === 'rest') {
         cmdLog('you rest. the world ticks on.', 'info')
       }
@@ -666,6 +694,7 @@ function showAuth() {
   charPosXYZEl.textContent = '—'
   charSettingEl.textContent = '—'
   if (charSettingDescEl) charSettingDescEl.textContent = ''
+  if (zLayerDisplayEl)   zLayerDisplayEl.textContent = '—'
 }
 
 function setActionsDisabled(disabled) {
