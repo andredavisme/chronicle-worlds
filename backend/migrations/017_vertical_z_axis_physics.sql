@@ -2,6 +2,7 @@
 -- Migration 017 — Vertical z-Axis Physics (Option F)
 -- Adds z_properties config table; flight + breath columns on characters;
 -- world_tick() patched with per-tick fall and suffocation logic.
+-- seed_setting_grid() patched with z_layers param.
 --
 -- z-layer rules (canonical):
 --   z =  0  ground        — always accessible
@@ -336,5 +337,50 @@ BEGIN
   v_payload := jsonb_build_object('duration_unit', v_du, 'tick_at', now());
   PERFORM pg_notify('world_tick', v_payload::text);
 
+END;
+$$;
+
+-- ── 6. Patch seed_setting_grid() — add z_layers param ────────────────────────
+-- z_layers controls how many layers above AND below z=0 are created.
+-- Default 0 = ground only (z=0), matching all prior behaviour.
+-- Example: z_layers => 2 creates z in {-2,-1,0,1,2}.
+-- Each z-slice gets the same x,y grid as z=0; layer_name sourced from z_properties.
+CREATE OR REPLACE FUNCTION seed_setting_grid(
+  p_setting_id  INT,
+  p_width       INT DEFAULT 10,
+  p_height      INT DEFAULT 10,
+  p_z_layers    INT DEFAULT 0   -- number of layers above+below ground
+)
+RETURNS INT   -- total cells created
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_x         INT;
+  v_y         INT;
+  v_z         INT;
+  v_z_min     INT;
+  v_z_max     INT;
+  v_count     INT := 0;
+  v_layer_name TEXT;
+BEGIN
+  v_z_min := -p_z_layers;
+  v_z_max :=  p_z_layers;
+
+  FOR v_z IN v_z_min .. v_z_max LOOP
+    -- Resolve layer name from z_properties; fall back to 'unknown'
+    SELECT layer_name INTO v_layer_name
+    FROM z_properties WHERE z_layer = v_z;
+    v_layer_name := COALESCE(v_layer_name, 'unknown');
+
+    FOR v_x IN 0 .. p_width - 1 LOOP
+      FOR v_y IN 0 .. p_height - 1 LOOP
+        INSERT INTO grid_cells (setting_id, x, y, z, terrain_type)
+        VALUES (p_setting_id, v_x, v_y, v_z, v_layer_name)
+        ON CONFLICT (setting_id, x, y, z) DO NOTHING;
+        v_count := v_count + 1;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  RETURN v_count;
 END;
 $$;
