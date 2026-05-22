@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Outer black circle -->
+  <circle cx="50" cy="50" r="50" fill="black"/>
+  <!-- White octagon outline -->
+  <polygon points="50,2 79,12 95,38 95,62 79,88 50,98 21,88 5,62 5,38 21,12" fill="none" stroke="white" stroke-width="3"/>
+  <!-- White tilted square -->
+  <polygon points="28,18 72,22 76,78 30,82" fill="white" transform="rotate(-8,50,50)"/>
+  <!-- Red zigzag / lightning shape -->
+  <polygon points="38,20 62,20 58,50 72,50 42,82 46,52 30,52" fill="red" transform="rotate(-8,50,50)"/>
+  <!-- White inner triangle outline -->
+  <polygon points="50,30 60,55 40,55" fill="none" stroke="white" stroke-width="1.5" transform="rotate(-8,50,50)"/>
+</svg>
