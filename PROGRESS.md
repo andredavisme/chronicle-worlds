@@ -448,23 +448,29 @@ See prior entry for full details. Summary:
 
 ---
 
-### 🔄 Milestone 21 — z-Axis UI Gates
-**Date:** —  | **Status:** Next up
+### ✅ Milestone 21 — z-Axis UI Gates
+**Date:** 2026-05-22 | **Status:** Complete
+**Files:** `frontend/index.html`, `frontend/src/app.js` | **Commit:** `233f30c`
 
-**What needs to be done:**
+**What was done:**
+- Updated travel modal vertical labels to `fly ▲` / `dive ▼` with tooltip text for movement requirements
+- Added `data-requires-flight="true"` to the Up button so the UI can gate vertical air travel
+- Added `#z-layer-display` to `#char-position-panel` so the current z-layer is always visible in the sidebar
+- `loadCharPosition(characterId)` now resolves `z_properties.layer_name` and renders values like `ground (z=0)` in the sidebar
+- `openTravelModal(characterId)` now queries the actor's `flight` attribute and disables the Up button with `.no-cell` styling when `flight = 0`
+- Text command travel path now blocks `fly` / `go up` for non-flight characters with `error: fly ↑ requires flight attribute`
+- `look` command now reuses the live sidebar z-layer display instead of issuing an extra DB query
 
-**`frontend/index.html` changes:**
-- Travel modal Up/Down buttons: update labels to `fly ↑` / `dive ↓` with `title` tooltip text explaining movement requirements
-- Add `data-requires-flight="true"` to the Up button so `app.js` can disable it when `flight = 0`
-- Add `#z-layer-display` line to `#char-position-panel` sidebar panel so current z-layer name is always visible (not just on `look`)
+**Validated live:**
+- Sidebar shows current z-layer continuously
+- Travel modal correctly disables Up for non-flight characters
+- Text mode `fly` command returns the expected gating error
+- Full vertical flow validated by user: milestone confirmed working end-to-end
 
-**`frontend/src/app.js` changes:**
-- `openTravelModal(characterId)`: after opening, fetch character's `flight` attribute; if `flight = 0`, disable the Up (fly) button with `.no-cell` class + tooltip
-- Dir-btn click handler: if `result.blocked`, surface reason in `#travel-error` instead of generic error
-- `executeAction('travel')` text path: same `blocked` check, output reason via `cmdLog`
-- `loadCharPosition(characterId)`: also query `z_properties` for the character's current `z` and populate `#z-layer-display`
-
-**Next step after this milestone:** Test full z-axis flow — travel Up from z=0 (spawn z=1), travel Up again from z=1 (spawn z=2 via scaffold), attempt with flight=0 character (UI block).
+**Key decisions:**
+- Flight enforcement remains a **UI-layer gate** at this milestone; physics-side enforcement is still deferred to Option G
+- `getAdjacentCellId()` already surfaced blocked scaffold reasons correctly from Milestone 20, so no extra discover-cell change was required here
+- `look` was simplified to reuse already-loaded UI state rather than re-querying `z_properties`
 
 ---
 
