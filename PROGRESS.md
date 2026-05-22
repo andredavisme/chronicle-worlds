@@ -316,51 +316,64 @@ See prior entry for full details. Summary:
 
 ---
 
+### ✅ Milestone 17 — Age-Based Attribute Modification (Option C)
+**Date:** 2026-05-11 | **Status:** Complete
+**Migration:** `015_age_bracket_modifiers` (applied `2026-05-11 23:39`)
+
+**What was done:**
+- Created `age_brackets` config table — one row per bracket×attribute pair:
+  - Youth  (age ≥  1): inspiration +2, health +5
+  - Prime  (age ≥ 20): health +10, attack +5, defense +5, inspiration −2
+  - Elder  (age ≥ 60): health −15, attack −3, defense +8, inspiration +5
+- `apply_age_bracket_modifiers(character_id, new_age)` helper — fires on exact threshold crossing; deletes prior bracket modifier for same char+attribute, then inserts replacement (brackets replace, not stack)
+- `world_tick()` patched — calls `apply_age_bracket_modifiers()` after aging each character each tick
+- New characters spawned at du%50 get youth bracket applied immediately (bootstrap at age 1)
+- Backfill DO block applies the highest-crossed bracket for each existing character based on current age
+- RLS: public SELECT on `age_brackets`
+
+**Key decisions:**
+- Modifiers use `source_entity_type = 'age_bracket'`, `priority = 10` (higher than action modifiers at 0)
+- `end_timestamp = NULL` — permanent (accumulating bracket approach)
+- Brackets replace each other per attribute — a character entering prime loses youth's inspiration +2 and gains prime's inspiration −2
+- `age_threshold = p_new_age` exact match means modifier fires exactly once per bracket per character; no retroactive stacking on old characters (backfill handles that separately)
+
+---
+
+### ✅ Milestone 18 — Attribute Pool on Entity Destruction (Option D)
+**Date:** 2026-05-11 | **Status:** Complete
+**Migration:** `016_attribute_pool_on_destruction` (applied `2026-05-11 23:53`)
+
+**What was done:**
+- Created `attribute_pool` table — holds harvested modifiers keyed by `setting_id` + `target_entity_type`; indexes on both
+- `harvest_attribute_modifiers(entity_type, entity_id)` — on destruction: finds entity's setting, moves all non-age-bracket active modifiers into the pool, deletes entity's `attribute_modifiers` rows, ends `entity_positions` record
+- `trg_character_destruction()` trigger — fires on `characters.health` UPDATE when `NEW.health <= 0 AND OLD.health > 0`
+- `trg_material_destruction()` trigger — fires on `materials.durability` UPDATE when `NEW.durability <= 0 AND OLD.durability > 0`
+- `draw_from_attribute_pool(setting_id, entity_type, entity_id, max_draws=2)` — FIFO draw from pool; inserts into `attribute_modifiers` with `source_entity_type = 'attribute_pool'`; deletes drawn rows; returns count drawn
+- `world_tick()` patched — calls `draw_from_attribute_pool()` for each newly spawned character (after youth bracket, before relationship seeding)
+- RLS: public SELECT on `attribute_pool`
+
+**Key decisions:**
+- Age bracket modifiers (`source_entity_type = 'age_bracket'`) are **excluded** from harvest — they are structural, not ecological history
+- Pool is **setting-scoped** — inheritance is local; modifiers from `cast bone` don't bleed into `etched bone`
+- FIFO draw order (`created_at ASC`) — oldest ecological history is consumed first
+- `max_draws = 2` keeps spawn overhead bounded; tunable per-call
+- Destruction triggers only fire on health/durability transition from >0 → ≤0 (not on repeated 0 updates)
+
+---
+
 ## 🔼 Next Milestone Candidates
 
 Choose one to tackle next:
 
-### Option B — Text Command Mode (Idea 4)
+### Option B — Text Command Mode ⭐ (recommended next)
 Toggle between button UI and text input. `parseCommand(input)` maps aliases (`go n`, `fight`, `trade`…) to `submitAction()`. `look` and `help` are local only. See Developer Notes below for full command dictionary.
 
-### Option C — Age-Based Attribute Modification (Idea 2)
-Insert/update `attribute_modifiers` when a character's age crosses youth/prime/elder brackets in `world_tick()`. Bracket thresholds as constants. Permanent accumulating modifiers.
-
-### Option D — Attribute Pool on Entity Destruction (Idea 1)
-Destruction trigger on `characters.health = 0` / `materials.durability = 0`. Moves `attribute_modifiers` rows into a `pooled = TRUE` flag or `attribute_pool` table. `world_tick()` spawn logic seeds new entities from the pool.
-
-### Option F — Vertical z-Axis Physical Mechanics (Idea 3)
+### Option F — Vertical z-Axis Physical Mechanics
 Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. `seed_setting_grid()` gains `z_layers` param. Height advantage modifier on conflict actions.
 
 ---
 
 ## Developer Notes — Future Ideas
-
----
-
-### 💡 Idea 1 — Attribute Pool on Entity Destruction
-
-**Concept:** When an entity's `health` or `durability` reaches `0`, its `attribute_modifiers` rows move into a shared pool. Newly spawned entities draw from this pool to seed initial attributes — ecological inheritance across world history.
-
-**Design considerations:**
-- New table `attribute_pool` or `pooled BOOLEAN` flag on `attribute_modifiers`
-- `world_tick()` spawn logic queries pool for new entity seeding
-- Pool scoped per `setting_id` (local inheritance) or global
-- Destruction trigger on `characters.health` and `materials.durability`
-- Chronicle entry records destruction events for lineage tracing
-
----
-
-### 💡 Idea 2 — Age-Based Attribute Modification
-
-**Concept:** Characters' attributes automatically modified at age bracket thresholds (youth/prime/elder). Aging already tracked in `world_tick()`.
-
-**Design considerations:**
-- Age bracket thresholds as constants or `age_brackets` config table
-- On tick, check if age crosses bracket; insert/update `attribute_modifiers`
-- Modifier values seeded procedurally for unique aging curves
-- Could interact with Idea 1: young vs. old death contributes differently weighted attribute pools
-- Permanent (accumulating) vs. per-bracket (replaced) modifiers
 
 ---
 
@@ -434,6 +447,8 @@ Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. 
 | Migration 012 | `012_public_read_game_tables` — SELECT policies on entity_positions + grid_cells + players |
 | Migration 013 | `013_add_setting_discovery_fields` — max_cells + cycle_order on settings |
 | Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS |
+| Migration 015 | `015_age_bracket_modifiers` — age_brackets table, apply_age_bracket_modifiers(), world_tick() patch, backfill |
+| Migration 016 | `016_attribute_pool_on_destruction` — attribute_pool table, harvest/draw helpers, destruction triggers, world_tick() patch |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v4, ACTIVE) |
 | Edge Function | `discover-cell` (ID: `da7a0ccb`, v3, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
