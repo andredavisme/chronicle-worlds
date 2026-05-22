@@ -1,7 +1,11 @@
-// resolve-turn/index.ts
+// resolve-turn/index.ts  v6
 // Handles all 5 player actions: exchange_information, resolve_conflict,
 // introduce_conflict, exchange_material, travel.
-// Depends on: 001_core_schema, 002_multiplayer_extensions migrations.
+// v6 additions (Option F — Vertical z-Axis Physics):
+//   - travel: blocked if destination z≥1 and character.flight=0
+//             blocked if destination z≤-2 and character.breath=0
+//   - introduce_conflict: +2 health damage bonus when actor z > target z (height advantage)
+// Depends on: migrations 001–017.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -25,8 +29,6 @@ const DURATION_MAP: Record<string, number> = {
 
 // ---------------------------------------------------------------------------
 // Travel duration formula
-// Inputs pulled from character + environment rows; all default to neutral 1.
-// Formula: base env difficulty × char penalty ÷ mat bonus × inspiration bonus
 // ---------------------------------------------------------------------------
 
 function computeTravelDuration(details: Record<string, number>): number {
@@ -48,7 +50,6 @@ function computeTravelDuration(details: Record<string, number>): number {
 
 // ---------------------------------------------------------------------------
 // Stat delta tracking
-// Accumulated during a turn and returned in the response for UI feedback.
 // ---------------------------------------------------------------------------
 
 interface StatDelta {
@@ -59,14 +60,13 @@ interface StatDelta {
 
 // ---------------------------------------------------------------------------
 // Attribute modifier map
-// For introduce_conflict the target is the *opponent* character, not the actor.
 // ---------------------------------------------------------------------------
 
 interface ModifierSpec {
   target_attribute: string;
   operator: '+' | '-';
   value: number;
-  target_is_opponent?: boolean; // if true, target_entity_id = details.target_character_id
+  target_is_opponent?: boolean;
 }
 
 const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
@@ -77,8 +77,8 @@ const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
 };
 
 // ---------------------------------------------------------------------------
-// Insert attribute_modifier row AND apply it immediately to the character row.
-// Returns a StatDelta entry for the response payload.
+// Insert attribute_modifier AND apply immediately to character row.
+// For introduce_conflict, damageBonus adds to the base value before applying.
 // ---------------------------------------------------------------------------
 
 async function applyModifier(
@@ -87,7 +87,8 @@ async function applyModifier(
   eventId: number,
   actorCharacterId: number,
   details: Record<string, number>,
-  now: number
+  now: number,
+  damageBonus: number = 0
 ): Promise<StatDelta | null> {
   const spec = ACTION_MODIFIERS[action];
   if (!spec) return null;
@@ -96,7 +97,9 @@ async function applyModifier(
     ? (details.target_character_id ?? actorCharacterId)
     : actorCharacterId;
 
-  // Record the modifier
+  // Effective value includes any height advantage bonus
+  const effectiveValue = spec.value + (spec.operator === '-' ? damageBonus : 0);
+
   await supabase.from('attribute_modifiers').insert({
     source_entity_type: 'event',
     source_entity_id: eventId,
@@ -104,14 +107,13 @@ async function applyModifier(
     target_entity_id: targetId,
     target_attribute: spec.target_attribute,
     operator: spec.operator,
-    value: spec.value,
+    value: effectiveValue,
     priority: 0,
     start_timestamp: now,
     end_timestamp: null,
   });
 
-  // Apply modifier immediately to the character row
-  const delta = spec.operator === '+' ? spec.value : -spec.value;
+  const delta = spec.operator === '+' ? effectiveValue : -effectiveValue;
   const { data: char } = await supabase
     .from('characters')
     .select(spec.target_attribute)
@@ -130,9 +132,41 @@ async function applyModifier(
 }
 
 // ---------------------------------------------------------------------------
-// exchange_material: transfer wealth from actor to target.
-// details.wealth_amount defaults to 1; details.target_character_id required.
-// Returns StatDelta entries for both sides.
+// z helpers
+// ---------------------------------------------------------------------------
+
+// Returns the z value of the grid_cell a character currently occupies.
+async function getCharacterZ(
+  supabase: SupabaseClient,
+  characterId: number
+): Promise<number | null> {
+  const { data } = await supabase
+    .from('entity_positions')
+    .select('grid_cells(z)')
+    .eq('entity_type', 'character')
+    .eq('entity_id', characterId)
+    .is('timestamp_end', null)
+    .limit(1)
+    .single();
+  const cell = (data as { grid_cells?: { z?: number } } | null)?.grid_cells;
+  return cell?.z ?? null;
+}
+
+// Returns the z value of a specific grid_cell by id.
+async function getCellZ(
+  supabase: SupabaseClient,
+  gridCellId: number
+): Promise<number | null> {
+  const { data } = await supabase
+    .from('grid_cells')
+    .select('z')
+    .eq('grid_cell_id', gridCellId)
+    .single();
+  return (data as { z?: number } | null)?.z ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// exchange_material
 // ---------------------------------------------------------------------------
 
 async function handleExchangeMaterial(
@@ -151,7 +185,7 @@ async function handleExchangeMaterial(
     .eq('character_id', actorCharacterId)
     .single();
 
-  if (!actor || (actor as Record<string, number>).wealth < amount) return []; // insufficient wealth
+  if (!actor || (actor as Record<string, number>).wealth < amount) return [];
 
   await supabase
     .from('characters')
@@ -178,8 +212,11 @@ async function handleExchangeMaterial(
 }
 
 // ---------------------------------------------------------------------------
-// travel: close old entity_position, open new one at destination grid cell.
-// details.destination_grid_cell_id required.
+// travel: z-guard then position update
+// Blocks move if:
+//   destination z >= 1 and character.flight = 0
+//   destination z <= -2 and character.breath = 0
+// Returns an error string if blocked, null if allowed.
 // ---------------------------------------------------------------------------
 
 async function handleTravel(
@@ -187,10 +224,32 @@ async function handleTravel(
   actorCharacterId: number,
   details: Record<string, number>,
   now: number
-) {
+): Promise<string | null> {
   const destCellId = details.destination_grid_cell_id;
-  if (!destCellId) return;
+  if (!destCellId) return null;
 
+  const destZ = await getCellZ(supabase, destCellId);
+
+  if (destZ !== null) {
+    // Fetch actor's flight + breath
+    const { data: charData } = await supabase
+      .from('characters')
+      .select('flight, breath')
+      .eq('character_id', actorCharacterId)
+      .single();
+
+    const flight: number = (charData as Record<string, number> | null)?.flight ?? 0;
+    const breath: number = (charData as Record<string, number> | null)?.breath ?? 0;
+
+    if (destZ >= 1 && flight === 0) {
+      return `Travel blocked: destination is air layer (z=${destZ}) but character has no flight.`;
+    }
+    if (destZ <= -2 && breath === 0) {
+      return `Travel blocked: destination is deep water (z=${destZ}) but character has no breath.`;
+    }
+  }
+
+  // Guard passed — execute position update
   await supabase
     .from('entity_positions')
     .update({ timestamp_end: now })
@@ -207,6 +266,8 @@ async function handleTravel(
     timestamp_start: now,
     timestamp_end: null,
   });
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +348,7 @@ serve(async (req: Request) => {
     const endTimestamp: number = now + duration;
 
     // ------------------------------------------------------------------
-    // 4. Branch fork limit check (time travel backward)
+    // 4. Branch fork limit check
     // ------------------------------------------------------------------
     if (details.branch_fork && details.parent_branch_id !== undefined) {
       const { count } = await supabase
@@ -339,7 +400,7 @@ serve(async (req: Request) => {
     const eventId: number = event.event_id;
 
     // ------------------------------------------------------------------
-    // 6. Action-specific side effects — collect stat_deltas for response
+    // 6. Action-specific side effects
     // ------------------------------------------------------------------
     const statDeltas: StatDelta[] = [];
 
@@ -347,12 +408,32 @@ serve(async (req: Request) => {
       const deltas = await handleExchangeMaterial(supabase, characterId, details);
       statDeltas.push(...deltas);
     } else if (action === 'travel') {
-      await handleTravel(supabase, characterId, details, now);
+      const travelError = await handleTravel(supabase, characterId, details, now);
+      if (travelError) {
+        // Roll back the pending event and return 403
+        await supabase.from('events').delete().eq('event_id', eventId);
+        return new Response(
+          JSON.stringify({ error: travelError }),
+          { status: 403, headers: CORS_HEADERS }
+        );
+      }
     }
 
-    // Apply attribute modifier (all non-travel actions)
+    // Attribute modifier (all non-travel actions)
     if (action !== 'travel') {
-      const modDelta = await applyModifier(supabase, action, eventId, characterId, details, now);
+      // Height advantage: introduce_conflict from higher z → +2 damage
+      let damageBonus = 0;
+      if (action === 'introduce_conflict' && details.target_character_id) {
+        const actorZ  = await getCharacterZ(supabase, characterId);
+        const targetZ = await getCharacterZ(supabase, details.target_character_id);
+        if (actorZ !== null && targetZ !== null && actorZ > targetZ) {
+          damageBonus = 2; // stacks with base -3 → effective -5
+        }
+      }
+
+      const modDelta = await applyModifier(
+        supabase, action, eventId, characterId, details, now, damageBonus
+      );
       if (modDelta) statDeltas.push(modDelta);
     }
 
@@ -387,7 +468,7 @@ serve(async (req: Request) => {
       .eq('event_id', eventId);
 
     // ------------------------------------------------------------------
-    // 9. Broadcast resolved turn to all clients
+    // 9. Broadcast resolved turn
     // ------------------------------------------------------------------
     await supabase.channel('turns').send({
       type: 'broadcast',
