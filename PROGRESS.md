@@ -329,7 +329,6 @@ See prior entry for full details. Summary:
 - `world_tick()` patched — calls `apply_age_bracket_modifiers()` after aging each character each tick
 - New characters spawned at du%50 get youth bracket applied immediately (bootstrap at age 1)
 - Backfill DO block applies the highest-crossed bracket for each existing character based on current age
-- RLS: public SELECT on `age_brackets`
 
 **Key decisions:**
 - Modifiers use `source_entity_type = 'age_bracket'`, `priority = 10` (higher than action modifiers at 0)
@@ -400,7 +399,7 @@ See prior entry for full details. Summary:
 
 ### ✅ Milestone 20 — Vertical z-Axis: z_properties + z-Scaffold Gate
 **Date:** 2026-05-22 | **Status:** Complete
-**Migration:** `017_z_properties` | **Edge Function:** `discover-cell` (v5, ACTIVE) | **Commits:** `737ab96`
+**Migration:** `017_z_properties` | **Edge Function:** `discover-cell` (v6, ACTIVE) | **Commits:** `737ab96`, `ad13672`, `267beaf`
 
 **What was done:**
 
@@ -414,28 +413,43 @@ See prior entry for full details. Summary:
 - RLS: public SELECT on `z_properties`
 - `look` command in text mode now queries `z_properties` and appends layer name to output
 
-**Edge Function `discover-cell` v5:**
-- New `checkZScaffold(x, y, z, setting_id)` function — enforces vertical cell creation rules:
-  - `z = 0` or `z = -1` → always permitted (ground / shallow water)
-  - `z ≥ 1` (air) → requires a cell at `z-1` in the same `x,y` column of that setting
-  - `z ≤ -2` (deep water) → requires a cell at `z+1` in the same `x,y` column of that setting
-  - Returns `{ blocked: true, reason: "no scaffold at z=0 — cannot enter air (z=1)" }` if check fails
-- Setting resolution (step 2) now happens **before** the scaffold check (step 3), so the correct setting's cells are always used
-- All responses now include `blocked: false` on the happy path for uniform client-side checking
-- Existing behaviour (cell lookup, setting assignment, `ensureSettingCopy`, procedural name generation) unchanged from v4
+**Edge Function `discover-cell` v5→v6:**
+- v5: Added `checkZScaffold(x, y, z, setting_id)` — enforces vertical cell adjacency rules
+- **v6 bugfix:** Vertical travel (`vertical: true` flag in request body) now always stays in the origin cell's setting, bypassing `max_cells` overflow logic — previously a full setting caused vertical travel to be assigned to a brand-new empty setting, making the scaffold check always fail
+- `app.js` now passes `vertical: dz !== 0` in every `discover-cell` call
+- `getAdjacentCellId()` correctly handles `data.blocked === true` and surfaces `data.reason` as the error string
+
+**Scaffold rules:**
+| z | Rule |
+|---|---|
+| `z = 0` or `z = -1` | Always permitted (ground / shallow water) |
+| `z ≥ 1` (air) | Requires cell at `z-1` in same `(x,y)` column + setting |
+| `z ≤ -2` (deep water) | Requires cell at `z+1` in same `(x,y)` column + setting |
+
+**Test results (console harness, 2026-05-22):**
+| Test | Result |
+|---|---|
+| z=0→1 up (`vertical: true`) | ✅ SPAWNED — cell 53, setting 1 (cast bone) |
+| z=1→2 scaffold present | ✅ SPAWNED — cell 54, setting 1 (cast bone) |
+| z=0→2 skip scaffold | 🚫 BLOCKED — correct |
+| z=0→-1 shallow water | ↩️ EXISTS — cell 52 |
+| z=0→-2 skip scaffold | 🚫 BLOCKED — correct |
+
+**Bugfixes (same session):**
+- **character 4 missing entity_positions row** — `admin@207analytix.com`'s character had never been seeded; inserted at cell 10 (`timestamp_start=1778540000`); 406 on page load resolved
+- **favicon 404** — added SVG favicon (`frontend/public/favicon.svg`) based on Chronicle Worlds logo; `index.html` updated with `<link rel="icon" type="image/svg+xml" href="/favicon.svg" />`
 
 **Key decisions:**
-- Scaffold rule is **per-column per-setting** — you can have `z=1` at `(3,4)` only if `z=0` at `(3,4)` in the same setting exists
-- `z=0` and `z=-1` are always enterable — the ground floor and shallow water are unconditional starting points
-- Physics enforcement (flight required for `z≥1`, breath for `z≤-2`) is a **UI-layer gate** (Milestone 21) not a DB constraint — the scaffold gate alone prevents floating cells
-- `discover-cell` returns HTTP 200 with `{ blocked: true, reason }` on scaffold failure (not 4xx) — client decides how to surface it
-- `conflict_modifier` and `material_decay_modifier` on `z_properties` are seeded but not yet wired into game logic — reserved for a future milestone
+- Scaffold rule is **per-column per-setting** — `z=1` at `(3,4)` only valid if `z=0` at `(3,4)` in same setting exists
+- `z=0` and `z=-1` are always enterable — ground floor and shallow water are unconditional starting points
+- Physics enforcement (flight/breath requirements) is a **UI-layer gate** (Milestone 21) — scaffold gate alone prevents floating cells
+- `discover-cell` returns HTTP 200 with `{ blocked: true, reason }` on scaffold failure (not 4xx)
+- `conflict_modifier` and `material_decay_modifier` on `z_properties` seeded but not yet wired — reserved for Option G
 
 ---
 
-### 🔄 Milestone 21 — z-Axis UI Gates (In Progress)
-**Date:** 2026-05-22 | **Status:** In Progress
-**Files:** `frontend/index.html`, `frontend/src/app.js`
+### 🔄 Milestone 21 — z-Axis UI Gates
+**Date:** —  | **Status:** Next up
 
 **What needs to be done:**
 
@@ -446,12 +460,11 @@ See prior entry for full details. Summary:
 
 **`frontend/src/app.js` changes:**
 - `openTravelModal(characterId)`: after opening, fetch character's `flight` attribute; if `flight = 0`, disable the Up (fly) button with `.no-cell` class + tooltip
-- `getAdjacentCellId()`: handle `data.blocked === true` from `discover-cell` v5 — return `{ blocked: true, error: data.reason }`
 - Dir-btn click handler: if `result.blocked`, surface reason in `#travel-error` instead of generic error
 - `executeAction('travel')` text path: same `blocked` check, output reason via `cmdLog`
 - `loadCharPosition(characterId)`: also query `z_properties` for the character's current `z` and populate `#z-layer-display`
 
-**Next step after this milestone:** Test the full z-axis flow end-to-end — attempt travel Up from z=0 (should succeed and spawn z=1 cell), attempt travel Up again from z=1 with no scaffold at z=1 in new position (should block), attempt as flight=0 character (should be blocked at UI layer).
+**Next step after this milestone:** Test full z-axis flow — travel Up from z=0 (spawn z=1), travel Up again from z=1 (spawn z=2 via scaffold), attempt with flight=0 character (UI block).
 
 ---
 
@@ -514,7 +527,7 @@ Wire `z_properties.movement_requirements` into `resolve-turn` and/or `world_tick
 | Migration 016 | `016_attribute_pool_on_destruction` — attribute_pool table, harvest/draw helpers, destruction triggers, world_tick() patch |
 | Migration 017 | `017_z_properties` — z_properties table, 5 seed rows (z=-2 to z=2), RLS |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v4, ACTIVE) |
-| Edge Function | `discover-cell` (ID: `da7a0ccb`, v5, ACTIVE) |
+| Edge Function | `discover-cell` (ID: `da7a0ccb`, v6, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Root Reality | `reality_id=1`, `name='Root'`, `parent_reality_id=NULL` |
@@ -522,6 +535,7 @@ Wire `z_properties.movement_requirements` into `resolve-turn` and/or `world_tick
 | Player A (dev) | `b6879b2f-801c-4459-aae1-6a8022e8e1a7` — `dev@chronicle.local` |
 | Player B (stub) | `00000000-0000-0000-0000-000000000002` |
 | Test player | `d30fe4d9-a9f3-43a2-947d-30c8d9d2cdd5` — `test@chroincle.local` |
+| Admin player | `7e02b48f-c839-4966-bc71-230e9c5b248c` — `admin@207analytix.com` — char4 |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 (enforced in Edge Function) |
 | Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated |
