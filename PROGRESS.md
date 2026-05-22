@@ -122,7 +122,7 @@ See prior entry for full details. Summary:
 
 ### ✅ Milestone 12 — World Discovery System
 **Date:** 2026-05-10 | **Status:** Complete
-**Migration:** `add_setting_discovery_fields` | **Edge Function:** `discover-cell` (v2, ACTIVE) | **Commit:** `ce3a49f`
+**Migration:** `add_setting_discovery_fields` | **Edge Function:** `discover-cell` (v2, superseded) | **Commit:** `ce3a49f`
 
 - Added `max_cells` and `cycle_order` to `settings` table
 - `discover-cell` Edge Function — called on every movement attempt
@@ -189,7 +189,7 @@ See prior entry for full details. Summary:
 
 ### ✅ Milestone 13b — Setting Identity via Reality Layer
 **Date:** 2026-05-11 | **Status:** Complete
-**Edge Function:** `discover-cell` (v3, ACTIVE) | **Commits:** `f70b2a8`, `e9f63ae`
+**Edge Function:** `discover-cell` (v3, superseded) | **Commits:** `f70b2a8`, `e9f63ae`
 
 **What was done:**
 - Upgraded `discover-cell` to v3 so setting discovery now ensures a Root reality `entity_copy` exists for every discovered setting
@@ -383,34 +383,11 @@ See prior entry for full details. Summary:
 - `HELP_TEXT`: static array of command hints printed by `help`
 - `TRAVEL_ALIASES`: flat alias map (e.g. `'go n'`, `'n'`, `'north'` all resolve to `'north'`)
 - `parseCommand(raw)`: trims/lowercases, returns `{ type, direction? }` / `{ type, action, amount? }` / `{ type, local }` / `null`
-- `handleCommand(raw)`: echoes input, calls `parseCommand`, routes:
-  - `local/help` → prints `HELP_TEXT` lines via `cmdLog`
-  - `local/look` → reads `charPosXYZEl` + `charSettingEl` + `charSettingDescEl`, prints via `cmdLog`
-  - `local/rest` → prints `you rest. the world ticks on.`
-  - `travel` → calls `executeAction('travel', characterId, user, { direction })` — bypasses compass modal entirely
-  - `action` → calls `executeAction(parsed.action, characterId, user, { amount })` — opens target modal for targeted actions
-  - `null` (unknown) → `cmdLog('unknown command — type "help" for a list', 'err')`
+- `handleCommand(raw)`: echoes input, calls `parseCommand`, routes to travel / action / local / null
 - `cmdSubmit` click and `cmdInput` Enter both call `handleCommand`
 - `setActionsDisabled` extended to also disable `#cmd-submit` during cooldown
 - `executeAction('travel', ..., { direction })` path: resolves cell via `getAdjacentCellId`, submits directly, returns `{ ok, copyName }` for inline log
-- `trade [amount]` regex: `^(?:trade|exchange material|give)(?:\s+(\d+))?$` — parses optional inline amount, pre-fills target modal
-
-**Command dictionary (live):**
-| Command | Aliases | Action |
-|---|---|---|
-| `go north` | `go n`, `n`, `north` | `travel` → N |
-| `go south` | `go s`, `s`, `south` | `travel` → S |
-| `go east`  | `go e`, `e`, `east`  | `travel` → E |
-| `go west`  | `go w`, `w`, `west`  | `travel` → W |
-| `go up`    | `up`, `u`, `ascend`  | `travel` → Up |
-| `go down`  | `down`, `d`, `descend` | `travel` → Down |
-| `talk`     | `exchange info`, `exchange information`, `speak` | `exchange_information` |
-| `fight`    | `attack`, `conflict`, `introduce conflict` | `introduce_conflict` |
-| `resolve`  | `resolve conflict` | `resolve_conflict` |
-| `trade [N]` | `exchange material [N]`, `give [N]` | `exchange_material` (amount optional) |
-| `look`     | `l`, `examine` | (local) print pos + setting |
-| `help`     | `?`, `commands` | (local) print command list |
-| `rest`     | `wait`, `idle` | (local) flavour only |
+- `trade [amount]` regex: `^(?:trade|exchange material|give)(?:\\s+(\\d+))?$` — parses optional inline amount, pre-fills target modal
 
 **Key decisions:**
 - Text mode is a **pure input layer** — all calls route through the same `submitAction()` / `executeAction()` pipeline as button mode; no parallel code paths
@@ -418,14 +395,76 @@ See prior entry for full details. Summary:
 - Targeted actions (`fight`, `resolve`, `trade`) still open the target picker modal in text mode — no inline target syntax (deferred)
 - `look` and `help` are **local only** — no server round-trip, no cooldown interaction
 - `rest` is flavour-only at this stage — no action submitted (rest as a real action deferred)
-- `#cmd-submit` disabled during cooldown alongside `.action-btn` elements via `setActionsDisabled`
+
+---
+
+### ✅ Milestone 20 — Vertical z-Axis: z_properties + z-Scaffold Gate
+**Date:** 2026-05-22 | **Status:** Complete
+**Migration:** `017_z_properties` | **Edge Function:** `discover-cell` (v5, ACTIVE) | **Commits:** `737ab96`
+
+**What was done:**
+
+**Migration `017_z_properties`:**
+- Created `z_properties` table — one config row per `z_layer` integer:
+  - `layer_name` (text) — canonical label, e.g. `"ground"`, `"air_1"`, `"shallow_water"`
+  - `movement_requirements` (JSONB) — e.g. `{"flight": 1}` for air layers, `{"breath": 1}` for deep water
+  - `material_decay_modifier` (numeric, default 1.0) — multiplier for `world_tick()` material decay at this z
+  - `conflict_modifier` (numeric, default 0.0) — height-advantage delta added to conflict resolution at this z
+- Seeded initial z_properties rows: `z=-2` (deep_water), `z=-1` (shallow_water), `z=0` (ground), `z=1` (air_1), `z=2` (air_2)
+- RLS: public SELECT on `z_properties`
+- `look` command in text mode now queries `z_properties` and appends layer name to output
+
+**Edge Function `discover-cell` v5:**
+- New `checkZScaffold(x, y, z, setting_id)` function — enforces vertical cell creation rules:
+  - `z = 0` or `z = -1` → always permitted (ground / shallow water)
+  - `z ≥ 1` (air) → requires a cell at `z-1` in the same `x,y` column of that setting
+  - `z ≤ -2` (deep water) → requires a cell at `z+1` in the same `x,y` column of that setting
+  - Returns `{ blocked: true, reason: "no scaffold at z=0 — cannot enter air (z=1)" }` if check fails
+- Setting resolution (step 2) now happens **before** the scaffold check (step 3), so the correct setting's cells are always used
+- All responses now include `blocked: false` on the happy path for uniform client-side checking
+- Existing behaviour (cell lookup, setting assignment, `ensureSettingCopy`, procedural name generation) unchanged from v4
+
+**Key decisions:**
+- Scaffold rule is **per-column per-setting** — you can have `z=1` at `(3,4)` only if `z=0` at `(3,4)` in the same setting exists
+- `z=0` and `z=-1` are always enterable — the ground floor and shallow water are unconditional starting points
+- Physics enforcement (flight required for `z≥1`, breath for `z≤-2`) is a **UI-layer gate** (Milestone 21) not a DB constraint — the scaffold gate alone prevents floating cells
+- `discover-cell` returns HTTP 200 with `{ blocked: true, reason }` on scaffold failure (not 4xx) — client decides how to surface it
+- `conflict_modifier` and `material_decay_modifier` on `z_properties` are seeded but not yet wired into game logic — reserved for a future milestone
+
+---
+
+### 🔄 Milestone 21 — z-Axis UI Gates (In Progress)
+**Date:** 2026-05-22 | **Status:** In Progress
+**Files:** `frontend/index.html`, `frontend/src/app.js`
+
+**What needs to be done:**
+
+**`frontend/index.html` changes:**
+- Travel modal Up/Down buttons: update labels to `fly ↑` / `dive ↓` with `title` tooltip text explaining movement requirements
+- Add `data-requires-flight="true"` to the Up button so `app.js` can disable it when `flight = 0`
+- Add `#z-layer-display` line to `#char-position-panel` sidebar panel so current z-layer name is always visible (not just on `look`)
+
+**`frontend/src/app.js` changes:**
+- `openTravelModal(characterId)`: after opening, fetch character's `flight` attribute; if `flight = 0`, disable the Up (fly) button with `.no-cell` class + tooltip
+- `getAdjacentCellId()`: handle `data.blocked === true` from `discover-cell` v5 — return `{ blocked: true, error: data.reason }`
+- Dir-btn click handler: if `result.blocked`, surface reason in `#travel-error` instead of generic error
+- `executeAction('travel')` text path: same `blocked` check, output reason via `cmdLog`
+- `loadCharPosition(characterId)`: also query `z_properties` for the character's current `z` and populate `#z-layer-display`
+
+**Next step after this milestone:** Test the full z-axis flow end-to-end — attempt travel Up from z=0 (should succeed and spawn z=1 cell), attempt travel Up again from z=1 with no scaffold at z=1 in new position (should block), attempt as flight=0 character (should be blocked at UI layer).
 
 ---
 
 ## 🔼 Next Milestone Candidates
 
-### Option F — Vertical z-Axis Physical Mechanics ⭐ (recommended next)
-Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. `seed_setting_grid()` gains `z_layers` param. Height advantage modifier on conflict actions.
+### Option G — z-Axis Physical Mechanics (gravity, flight, buoyancy) ⭐ (recommended after M21)
+Wire `z_properties.movement_requirements` into `resolve-turn` and/or `world_tick()`. Characters without `flight` at `z≥1` fall one layer per tick. Characters without `breath` at `z≤-2` take decay damage. Height advantage: `conflict_modifier` from `z_properties` added to `introduce_conflict` / `resolve_conflict` stat delta.
+
+### Option H — `seed_setting_grid()` z_layers param
+`seed_setting_grid(setting_id, width, height, z_layers)` — spawn multi-storey settings with full z columns. Required before large-scale vertical world generation.
+
+### Option I — Rest as a Real Action
+`rest` submits a no-op turn that still triggers cooldown. Could grant small inspiration or health regen via `applyModifier`. Already wired in command parser as flavour-only.
 
 ---
 
@@ -473,8 +512,9 @@ Gravity, buoyancy, flight, elevation advantage. Structures as stacked z-layers. 
 | Migration 014 | `014_realities_and_entity_copies` — realities, entity_copies, root reality seed, RLS |
 | Migration 015 | `015_age_bracket_modifiers` — age_brackets table, apply_age_bracket_modifiers(), world_tick() patch, backfill |
 | Migration 016 | `016_attribute_pool_on_destruction` — attribute_pool table, harvest/draw helpers, destruction triggers, world_tick() patch |
+| Migration 017 | `017_z_properties` — z_properties table, 5 seed rows (z=-2 to z=2), RLS |
 | Edge Function | `resolve-turn` (ID: `a68468fa`, v4, ACTIVE) |
-| Edge Function | `discover-cell` (ID: `da7a0ccb`, v3, ACTIVE) |
+| Edge Function | `discover-cell` (ID: `da7a0ccb`, v5, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
 | Root Reality | `reality_id=1`, `name='Root'`, `parent_reality_id=NULL` |
