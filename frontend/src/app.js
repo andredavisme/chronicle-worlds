@@ -3,6 +3,9 @@ import { initTurnManager, submitAction, resetCooldown, getCooldownRemaining } fr
 import { initGridRenderer, loadEntityPositions, updateGrid, setLocalCharacterId } from './grid-renderer.js'
 import { loadChronicle, appendChronicleEntry } from './chronicle-reader.js'
 
+// ── Dev helper: expose supabase client to browser console ──
+window.__sb = supabase
+
 const authPanel       = document.getElementById('auth-panel')
 const gameArea        = document.getElementById('game-area')
 const sidebar         = document.getElementById('sidebar')
@@ -410,11 +413,8 @@ document.querySelectorAll('.dir-btn[data-dir]').forEach(btn => {
     setActionsDisabled(true)
     try {
       await submitAction('travel', { destination_grid_cell_id: cellId })
-      // Option A fix: do NOT call setActionsDisabled(false) here.
-      // The cooldown onDisabled callback is the sole authority on re-enabling.
     } catch (e) {
       statusEl.textContent = `error: ${e.message}`
-      // Only re-enable on error (cooldown was not started)
       setActionsDisabled(false)
     }
   })
@@ -426,7 +426,6 @@ async function executeAction(action, characterId, user, opts = {}) {
     if (!characterId) { statusEl.textContent = 'error: no character assigned'; return }
     if (getCooldownRemaining() > 0) return
 
-    // Text mode: bypass modal if direction supplied
     if (opts.direction) {
       setActionsDisabled(true)
       const { cellId, spawned, copyName, error } = await getAdjacentCellId(opts.direction, characterId)
@@ -440,16 +439,14 @@ async function executeAction(action, characterId, user, opts = {}) {
         : `entering ${copyName ?? `cell to the ${opts.direction}`}…`
       try {
         await submitAction('travel', { destination_grid_cell_id: cellId })
-        // Option A fix: do NOT call setActionsDisabled(false) here.
         return { ok: true, copyName }
       } catch (e) {
         statusEl.textContent = `error: ${e.message}`
-        setActionsDisabled(false) // only re-enable on error
+        setActionsDisabled(false)
         return { error: e.message }
       }
     }
 
-    // Button mode: open modal
     await openTravelModal(characterId)
     return { ok: true }
   }
@@ -583,7 +580,6 @@ async function showGame(user) {
         const desc    = charSettingDescEl?.textContent ?? ''
         cmdLog(`pos: ${pos}  setting: ${setting}`, 'info')
         if (desc) cmdLog(`  ${desc}`, 'info')
-        // Inline z-layer label lookup
         const { data: posData } = await supabase
           .from('entity_positions')
           .select('grid_cells(z)')
