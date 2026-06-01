@@ -1,10 +1,246 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chronicle Worlds</title>
-  <style>
-    /* ... (full file content passed inline) ... */
-  </style>
-</head>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chronicle Worlds</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: #0a0a0f; color: #cccccc; font-family: 'Courier New', monospace; font-size: 0.85rem; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+      #top-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #111118; border-bottom: 1px solid #222230; flex-shrink: 0; }
+      #logo { display: flex; align-items: center; gap: 8px; }
+      #logo svg { width: 28px; height: 28px; }
+      #logo-text { font-size: 1rem; font-weight: bold; letter-spacing: 0.08em; color: #9999cc; }
+      #status { font-size: 0.75rem; color: #666699; }
+      #main-layout { display: flex; flex: 1; overflow: hidden; }
+      #canvas-container { flex: 1; position: relative; overflow: hidden; }
+      canvas { display: block; }
+      #sidebar { width: 220px; background: #0e0e18; border-left: 1px solid #222230; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+      #char-info { padding: 10px 12px; border-bottom: 1px solid #1a1a28; font-size: 0.75rem; color: #8888aa; }
+      #char-info .label { color: #555577; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+      #char-info .value { color: #aaaacc; margin-bottom: 6px; }
+      #char-pos-panel { padding: 8px 12px; border-bottom: 1px solid #1a1a28; font-size: 0.72rem; color: #7777aa; }
+      #char-pos-panel .pos-label { color: #444466; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      #char-pos-panel .pos-val { color: #9999bb; }
+      #char-pos-panel .setting-desc { color: #666688; font-style: italic; margin-top: 2px; font-size: 0.68rem; }
+      #char-pos-panel .z-layer-badge { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 3px; font-size: 0.65rem; background: #1a1a2e; border: 1px solid #333355; color: #8888bb; }
+      #action-area { padding: 10px 12px; border-bottom: 1px solid #1a1a28; flex-shrink: 0; }
+      #action-area .section-label { color: #444466; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; }
+      #mode-toggle { background: none; border: 1px solid #333355; color: #666688; font-family: inherit; font-size: 0.6rem; padding: 2px 6px; border-radius: 3px; cursor: pointer; }
+      #mode-toggle:hover { border-color: #5555aa; color: #9999cc; }
+      #action-panel { display: flex; flex-direction: column; gap: 6px; }
+      .action-btn {
+        background: #111120;
+        border: 1px solid #2a2a40;
+        color: #8888bb;
+        padding: 7px 10px;
+        font-family: inherit;
+        font-size: 0.75rem;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 3px;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
+      .action-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+        color: #555577;
+        border-color: #1a1a2a;
+      }
+      #cmd-panel { display: none; }
+      #cmd-input-wrap { display: flex; align-items: center; gap: 6px; }
+      #cmd-prefix { color: #444466; font-size: 0.8rem; }
+      #cmd-input { flex: 1; background: #0a0a14; border: 1px solid #2a2a40; color: #aaaacc; font-family: inherit; font-size: 0.75rem; padding: 6px 8px; border-radius: 3px; outline: none; }
+      #cmd-input:focus { border-color: #5555aa; }
+      #cmd-log { margin-top: 8px; max-height: 120px; overflow-y: auto; font-size: 0.7rem; }
+      .cmd-line { padding: 1px 0; line-height: 1.4; }
+      .cmd-line.info { color: #7777aa; }
+      .cmd-line.out  { color: #99aacc; }
+      .cmd-line.err  { color: #cc7777; }
+      #cooldown-bar-wrap { padding: 8px 12px; border-bottom: 1px solid #1a1a28; display: none; }
+      #cooldown-label { font-size: 0.65rem; color: #444466; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+      #cooldown-bar-bg { height: 4px; background: #1a1a28; border-radius: 2px; }
+      #cooldown-bar-fill { height: 4px; background: #5555aa; border-radius: 2px; width: 0%; transition: width 0.5s linear; }
+      #stat-deltas { padding: 6px 12px; font-size: 0.7rem; color: #666688; border-bottom: 1px solid #1a1a28; min-height: 22px; }
+      .delta-pos { color: #66cc88; }
+      .delta-neg { color: #cc6677; }
+      #world-log { flex: 1; overflow-y: auto; padding: 8px 12px; font-size: 0.7rem; }
+      .log-entry { padding: 3px 0; border-bottom: 1px solid #111120; color: #555577; line-height: 1.4; }
+      .log-entry .actor { color: #7777aa; }
+      .log-entry .action-type { color: #555599; font-size: 0.65rem; }
+      .log-entry .tick { color: #333355; font-size: 0.62rem; float: right; }
+      #travel-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+      #travel-modal.open { display: flex; }
+      #travel-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 280px; }
+      #travel-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 12px; letter-spacing: 0.06em; }
+      .compass-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+      .compass-btn { background: #1a1a2e; border: 1px solid #2a2a44; color: #8888bb; padding: 10px; font-family: inherit; font-size: 0.8rem; border-radius: 3px; cursor: pointer; text-align: center; }
+      .compass-btn:hover:not(:disabled) { border-color: #5555aa; color: #ccccff; }
+      .compass-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+      .compass-btn.center { background: none; border: none; color: #333355; cursor: default; }
+      #travel-cost-info { font-size: 0.7rem; color: #555577; margin-bottom: 10px; }
+      #travel-cancel { background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 6px 12px; border-radius: 3px; cursor: pointer; width: 100%; }
+      #travel-cancel:hover { border-color: #444466; color: #8888aa; }
+      #target-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+      #target-modal.open { display: flex; }
+      #target-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 300px; max-height: 400px; display: flex; flex-direction: column; }
+      #target-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 4px; letter-spacing: 0.06em; }
+      #target-modal-subtitle { font-size: 0.7rem; color: #555577; margin-bottom: 12px; }
+      #target-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+      .target-btn { background: #1a1a2e; border: 1px solid #2a2a44; color: #8888bb; padding: 8px 12px; font-family: inherit; font-size: 0.75rem; border-radius: 3px; cursor: pointer; text-align: left; }
+      .target-btn:hover { border-color: #5555aa; color: #ccccff; }
+      #target-cancel { background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 6px 12px; border-radius: 3px; cursor: pointer; width: 100%; }
+      #target-cancel:hover { border-color: #444466; color: #8888aa; }
+      #amount-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 110; align-items: center; justify-content: center; }
+      #amount-modal.open { display: flex; }
+      #amount-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 260px; }
+      #amount-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 8px; }
+      #amount-input { width: 100%; background: #0a0a14; border: 1px solid #2a2a40; color: #aaaacc; font-family: inherit; font-size: 0.85rem; padding: 8px; border-radius: 3px; outline: none; margin-bottom: 10px; }
+      #amount-input:focus { border-color: #5555aa; }
+      .amount-btn-row { display: flex; gap: 8px; }
+      #amount-confirm { flex: 1; background: #2a2a4a; border: 1px solid #4444aa; color: #aaaadd; font-family: inherit; font-size: 0.75rem; padding: 7px; border-radius: 3px; cursor: pointer; }
+      #amount-confirm:hover { background: #333366; }
+      #amount-cancel { flex: 1; background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 7px; border-radius: 3px; cursor: pointer; }
+      #amount-cancel:hover { border-color: #444466; color: #8888aa; }
+      @media (max-width: 640px) {
+        #sidebar { width: 100%; height: 220px; border-left: none; border-top: 1px solid #222230; }
+        #main-layout { flex-direction: column; }
+        #action-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .action-btn { padding: 12px 8px; font-size: 0.75rem; text-align: center; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="top-bar">
+      <div id="logo">
+        <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Chronicle Worlds">
+          <circle cx="14" cy="14" r="12" stroke="#5555aa" stroke-width="1.5"/>
+          <ellipse cx="14" cy="14" rx="5" ry="12" stroke="#5555aa" stroke-width="1"/>
+          <line x1="2" y1="14" x2="26" y2="14" stroke="#5555aa" stroke-width="1"/>
+          <line x1="4" y1="8" x2="24" y2="8" stroke="#333366" stroke-width="0.75"/>
+          <line x1="4" y1="20" x2="24" y2="20" stroke="#333366" stroke-width="0.75"/>
+          <circle cx="14" cy="14" r="2" fill="#7777cc"/>
+        </svg>
+        <span id="logo-text">CHRONICLE WORLDS</span>
+      </div>
+      <div id="status">connecting…</div>
+    </div>
+
+    <div id="main-layout">
+      <div id="canvas-container">
+        <canvas id="grid-canvas"></canvas>
+      </div>
+
+      <div id="sidebar">
+        <div id="char-info">
+          <div class="label">Character</div>
+          <div class="value" id="char-name">—</div>
+          <div class="label">Archetype</div>
+          <div class="value" id="char-archetype">—</div>
+          <div class="label">Stats</div>
+          <div class="value" id="char-stats">—</div>
+        </div>
+
+        <div id="char-pos-panel">
+          <span class="pos-label">Position </span>
+          <span class="pos-val" id="char-pos-xyz">—</span>
+          <div class="setting-desc" id="char-setting-desc"></div>
+          <div id="z-layer-badge-wrap"><span class="z-layer-badge" id="z-layer-badge"></span></div>
+        </div>
+
+        <div id="action-area">
+          <div class="section-label">
+            <span id="mode-label">ACTIONS</span>
+            <button id="mode-toggle">TEXT</button>
+          </div>
+
+          <div id="action-panel">
+            <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
+            <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
+            <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
+            <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
+            <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
+            <button class="action-btn" data-action="rest">Rest <span style="color:#444">[15u]</span></button>
+          </div>
+
+          <div id="cmd-panel">
+            <div id="cmd-input-wrap">
+              <span id="cmd-prefix">&gt;</span>
+              <input id="cmd-input" type="text" placeholder="enter command…" autocomplete="off" spellcheck="false" />
+            </div>
+            <div id="cmd-log"></div>
+          </div>
+        </div>
+
+        <div id="cooldown-bar-wrap">
+          <div id="cooldown-label">COOLDOWN</div>
+          <div id="cooldown-bar-bg"><div id="cooldown-bar-fill"></div></div>
+        </div>
+
+        <div id="stat-deltas"></div>
+
+        <div id="world-log"></div>
+      </div>
+    </div>
+
+    <!-- Travel modal -->
+    <div id="travel-modal" role="dialog" aria-modal="true" aria-labelledby="travel-modal-title">
+      <div id="travel-modal-inner">
+        <h3 id="travel-modal-title">TRAVEL</h3>
+        <div class="compass-grid">
+          <button class="compass-btn" data-dir="nw">NW</button>
+          <button class="compass-btn" data-dir="n">N</button>
+          <button class="compass-btn" data-dir="ne">NE</button>
+          <button class="compass-btn" data-dir="w">W</button>
+          <button class="compass-btn center" disabled>◆</button>
+          <button class="compass-btn" data-dir="e">E</button>
+          <button class="compass-btn" data-dir="sw">SW</button>
+          <button class="compass-btn" data-dir="s">S</button>
+          <button class="compass-btn" data-dir="se">SE</button>
+        </div>
+        <div id="travel-z-row" style="display:flex;gap:6px;margin-bottom:10px;">
+          <button class="compass-btn" data-dir="up" id="travel-up-btn" style="flex:1">UP ▲</button>
+          <button class="compass-btn" data-dir="down" id="travel-down-btn" style="flex:1">▼ DOWN</button>
+        </div>
+        <div id="travel-cost-info">cost: calculating…</div>
+        <button id="travel-cancel">CANCEL</button>
+      </div>
+    </div>
+
+    <!-- Target picker modal -->
+    <div id="target-modal" role="dialog" aria-modal="true" aria-labelledby="target-modal-title">
+      <div id="target-modal-inner">
+        <h3 id="target-modal-title">SELECT TARGET</h3>
+        <div id="target-modal-subtitle">choose a character at your location</div>
+        <div id="target-list"></div>
+        <button id="target-cancel">CANCEL</button>
+      </div>
+    </div>
+
+    <!-- Amount modal -->
+    <div id="amount-modal" role="dialog" aria-modal="true" aria-labelledby="amount-modal-title">
+      <div id="amount-modal-inner">
+        <h3 id="amount-modal-title">EXCHANGE MATERIAL</h3>
+        <input id="amount-input" type="number" min="1" placeholder="amount…" />
+        <div class="amount-btn-row">
+          <button id="amount-confirm">CONFIRM</button>
+          <button id="amount-cancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+    <script>
+      const sidebar = document.getElementById('sidebar')
+      const toggle  = document.getElementById('mode-toggle')
+      if (window.innerWidth <= 640 && toggle) {
+        toggle.addEventListener('click', () => {
+          const isOpen = sidebar.classList.toggle('open')
+          toggle.innerHTML = isOpen ? 'ACTIONS &#9660;' : 'ACTIONS &#9650;'
+        })
+      }
+    </script>
+  </body>
+</html>
