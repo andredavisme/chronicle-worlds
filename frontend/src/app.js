@@ -150,20 +150,53 @@ async function updatePositionDisplay(x, y, z) {
     charSettingEl.textContent = ''
   }
 
-  // z-layer badge — fixed: column is z_layer (not z), field is layer_name (not label)
+  // z-layer badge with tooltip: conflict_modifier + decay warnings
   const zVal = z ?? 0
   const { data: zRow } = await supabase
     .from('z_properties')
-    .select('layer_name, requires_flight')
+    .select('layer_name, requires_flight, requires_breath, conflict_modifier, health_decay, durability_decay_multiplier')
     .eq('z_layer', zVal)
     .maybeSingle()
 
   if (zRow) {
     zLayerBadgeEl.textContent = `z${zVal}: ${zRow.layer_name}`
     zLayerBadgeEl.style.display = 'inline-block'
+
+    // Build tooltip lines
+    const lines = [`z-layer: ${zRow.layer_name}`]
+
+    const mod = zRow.conflict_modifier
+    if (mod != null) {
+      const sign = mod >= 0 ? '+' : ''
+      lines.push(`Conflict modifier: ${sign}${mod}`)
+    }
+
+    const warnings = []
+    if (zRow.health_decay > 0)
+      warnings.push(`health decay: -${zRow.health_decay}/tick`)
+    if (zRow.durability_decay_multiplier > 1)
+      warnings.push(`durability decay: ×${zRow.durability_decay_multiplier}`)
+    if (zRow.requires_flight)
+      warnings.push('requires flight')
+    if (zRow.requires_breath)
+      warnings.push('requires breath')
+
+    if (warnings.length > 0)
+      lines.push(`⚠ ${warnings.join(' · ')}`)
+
+    zLayerBadgeEl.title = lines.join('\n')
+
+    // Visual decay indicator on the badge itself
+    if (zRow.health_decay > 0 || zRow.durability_decay_multiplier > 1) {
+      zLayerBadgeEl.dataset.decay = 'true'
+    } else {
+      delete zLayerBadgeEl.dataset.decay
+    }
   } else {
     zLayerBadgeEl.textContent = `z${zVal}`
     zLayerBadgeEl.style.display = 'inline-block'
+    zLayerBadgeEl.title = ''
+    delete zLayerBadgeEl.dataset.decay
   }
 }
 
@@ -454,7 +487,9 @@ async function handleCommand(raw, user) {
       const pos     = charPosXYZEl.textContent
       const setting = charSettingEl.textContent
       const badge   = zLayerBadgeEl.textContent
+      const tip     = zLayerBadgeEl.title
       cmdLogFn(`you are at ${pos}${badge ? ' [' + badge + ']' : ''}${setting ? ' — ' + setting : ''}`, 'out')
+      if (tip) tip.split('\n').slice(1).forEach(l => cmdLogFn(`  ${l}`, 'info'))
     } else if (parsed.local === 'rest') {
       if (getCooldownRemaining() > 0) { cmdLogFn('still on cooldown…', 'err'); return }
       cmdLogFn('resting…', 'info')
