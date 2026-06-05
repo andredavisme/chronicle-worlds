@@ -104,6 +104,18 @@
       #amount-confirm:hover { background: #333366; }
       #amount-cancel { flex: 1; background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 7px; border-radius: 3px; cursor: pointer; }
       #amount-cancel:hover { border-color: #444466; color: #8888aa; }
+      /* Snapshot panel — shown after reveal_stat */
+      #snapshot-panel {
+        display: none;
+        padding: 8px 12px;
+        border-bottom: 1px solid #1a1a28;
+        font-size: 0.68rem;
+        color: #7777aa;
+        background: #0d0d1a;
+      }
+      #snapshot-panel .snap-label { color: #444466; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+      #snapshot-panel .snap-row { display: flex; flex-wrap: wrap; gap: 6px; }
+      #snapshot-panel .snap-stat { color: #8899bb; }
       @media (max-width: 640px) {
         #sidebar { width: 100%; height: 220px; border-left: none; border-top: 1px solid #222230; }
         #main-layout { flex-direction: column; }
@@ -111,7 +123,7 @@
         .action-btn { padding: 12px 8px; font-size: 0.75rem; text-align: center; }
       }
     </style>
-    <script type="module" crossorigin src="/chronicle-worlds/assets/index-BFSNR48x.js"></script>
+    <script type="module" crossorigin src="/chronicle-worlds/assets/index-B89z8CP9.js"></script>
   </head>
   <body>
     <div id="top-bar">
@@ -162,6 +174,7 @@
             <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
             <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
             <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
+            <button class="action-btn" data-action="reveal_stat">Observe <span style="color:#444">[8u]</span></button>
             <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
             <button class="action-btn" data-action="rest">Rest <span style="color:#444">[15u]</span></button>
           </div>
@@ -181,6 +194,12 @@
         </div>
 
         <div id="stat-deltas"></div>
+
+        <!-- Snapshot panel: revealed target stats (only visible after observe) -->
+        <div id="snapshot-panel">
+          <div class="snap-label">Observed</div>
+          <div class="snap-row" id="snapshot-row"></div>
+        </div>
 
         <div id="world-log"></div>
       </div>
