@@ -154,3 +154,26 @@ Last updated: **2026-06-01 (Session 1)**
 | Flight gate location | UI layer (Milestone 21); physics deferred | Unblocks vertical UI without requiring full physics sim |
 | FIFO attribute pool | `created_at ASC` draw order | Oldest ecological history consumed first — ecological realism |
 | Age bracket modifiers replace | DELETE prior bracket row, INSERT new | Brackets don't stack — youth inspiration doesn't persist into prime |
+
+---
+
+## Future Planning Ideas
+
+> These are design intentions to be incorporated in future milestones. Not yet implemented.
+
+### 1. World Balance & Health Cycle
+
+- **World health measure:** A global life/health pool tracks the overall sustainability of the world. Health is consumed as entities are created and restored (recycled) when entities are destroyed or expire.
+- **Entity health linkage:** Created entities that carry a health/life measure contribute to and draw from the world health pool. Their creation reduces the pool; their destruction recycles health back into it, and new creations further increase it over time.
+- **Healthless entity transport:** Created entities with no health/life measure are subject to automated transportation upon a trigger condition. This acts as a self-sustaining propagation mechanic — relocating inactive or unoccupied entities to attract player characters toward untraveled parts of the grid.
+- **Goal:** Balance measures dictate location sustainability, preventing dead zones and encouraging organic world spread.
+
+### 2. Community Location Generation Conditions
+
+Before the world engine can auto-generate a **community location** on the grid, all three of the following conditions must be satisfied:
+
+1. **Human discovery** — The grid location must have been discovered by a human player character without automation assistance.
+2. **Human presence threshold** — At least 3 human player characters must have occupied the grid location **or an adjacent grid location**.
+3. **Simultaneous occupation** — At least 2 human player characters must have occupied the grid location **at the same time**.
+
+Once all three conditions are met, automated generation of non-player characters (NPCs) becomes eligible at that location, enabling organic world development and community growth.
