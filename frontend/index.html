@@ -6,8 +6,230 @@
     <title>Chronicle Worlds</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
+      /* ── Reset ── */
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: #0a0a0f; color: #cccccc; font-family: 'Courier New', monospace; font-size: 0.85rem; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+      body { background: #0a0a0f; color: #cccccc; font-family: 'Courier New', monospace; font-size: 0.85rem; }
+
+      /* ══════════════════════════════════════════════════════════════════════
+         LANDING SCREEN
+      ══════════════════════════════════════════════════════════════════════ */
+      #landing-screen { display: block; min-height: 100vh; position: relative; overflow-x: hidden; }
+      #landing-screen.hidden { display: none; }
+
+      /* Animated grid background */
+      #lp-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+      #lp-grid-lines {
+        position: absolute; inset: -40px;
+        background-image:
+          linear-gradient(rgba(85,85,170,0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(85,85,170,0.07) 1px, transparent 1px);
+        background-size: 60px 60px;
+        animation: gridDrift 40s linear infinite;
+      }
+      @keyframes gridDrift {
+        0%   { transform: translate(0, 0); }
+        100% { transform: translate(60px, 60px); }
+      }
+
+      /* Content layer */
+      #lp-content { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
+
+      /* Header */
+      #lp-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 20px 0 40px;
+      }
+      #lp-logo { display: flex; align-items: center; gap: 10px; color: #9999cc; font-size: 0.9rem; letter-spacing: 0.1em; }
+      #lp-logo svg { width: 26px; height: 26px; }
+
+      /* Player count */
+      #lp-player-count {
+        display: flex; flex-direction: column; align-items: flex-end;
+        cursor: default;
+      }
+      #lp-count-num {
+        font-size: 2.2rem; font-weight: bold; color: #9999dd;
+        letter-spacing: -0.02em; line-height: 1;
+      }
+      #lp-count-label {
+        font-size: 0.62rem; color: #444466; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-top: 2px;
+      }
+
+      /* Main two-column layout */
+      #lp-main { display: grid; grid-template-columns: 1fr 340px; gap: 48px; align-items: start; margin-bottom: 80px; }
+
+      /* Philosophy */
+      #lp-philosophy {}
+      #lp-headline {
+        font-size: 1.7rem; font-weight: normal; color: #bbbbee;
+        letter-spacing: 0.01em; line-height: 1.35; margin-bottom: 28px;
+      }
+      #lp-sub, #lp-sub2 {
+        font-size: 0.82rem; color: #7777aa; line-height: 1.8;
+        margin-bottom: 16px; max-width: 520px;
+      }
+      #lp-sub2 em { color: #9999bb; font-style: italic; }
+      #lp-learn-more {
+        display: inline-block; margin-top: 12px;
+        font-size: 0.72rem; color: #555577; text-decoration: none;
+        letter-spacing: 0.06em;
+        transition: color 0.2s;
+      }
+      #lp-learn-more:hover { color: #8888bb; }
+
+      /* Auth panel */
+      #lp-enter {}
+      #lp-enter-inner {
+        background: #0e0e1a;
+        border: 1px solid #222236;
+        border-radius: 6px;
+        padding: 24px;
+      }
+      #lp-enter-heading {
+        font-size: 0.65rem; color: #444466; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-bottom: 16px;
+      }
+      #auth-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+      .auth-tab {
+        flex: 1; background: none;
+        border: 1px solid #222233; color: #555577;
+        font-family: inherit; font-size: 0.75rem; padding: 7px;
+        border-radius: 3px; cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .auth-tab.active { border-color: #5555aa; color: #9999cc; }
+      .auth-tab:hover:not(.active) { border-color: #333355; color: #7777aa; }
+      #auth-fields { display: flex; flex-direction: column; gap: 10px; }
+      #lp-email, #lp-pw {
+        background: #080810; border: 1px solid #222230;
+        color: #aaaacc; font-family: inherit; font-size: 0.8rem;
+        padding: 9px 12px; border-radius: 3px; outline: none;
+      }
+      #lp-email:focus, #lp-pw:focus { border-color: #4444aa; }
+      #lp-submit {
+        background: #1a1a3a; border: 1px solid #4444aa; color: #aaaadd;
+        font-family: inherit; font-size: 0.8rem; padding: 10px;
+        border-radius: 3px; cursor: pointer; letter-spacing: 0.06em;
+        transition: background 0.15s;
+      }
+      #lp-submit:hover:not(:disabled) { background: #252550; }
+      #lp-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+      #lp-auth-msg {
+        font-size: 0.72rem; color: #cc7777; min-height: 18px;
+        line-height: 1.4;
+      }
+      #lp-auth-msg.success { color: #66cc88; }
+
+      /* Mechanics section */
+      #lp-mechanics { padding-top: 20px; border-top: 1px solid #111122; margin-bottom: 60px; }
+      #lp-mechanics-label {
+        font-size: 0.62rem; color: #333355; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-bottom: 24px;
+      }
+      #lp-mechanic-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 36px; }
+      .mechanic-card {
+        background: #0c0c18; border: 1px solid #1a1a2c;
+        border-radius: 4px; padding: 18px 16px;
+      }
+      .mc-icon { font-size: 1.3rem; color: #5555aa; margin-bottom: 8px; }
+      .mc-title { font-size: 0.78rem; color: #9999cc; letter-spacing: 0.06em; margin-bottom: 8px; }
+      .mc-body { font-size: 0.72rem; color: #555577; line-height: 1.7; }
+
+      /* Action table */
+      .lp-table-label {
+        font-size: 0.62rem; color: #333355; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-bottom: 12px;
+      }
+      #lp-action-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+      #lp-action-table th {
+        text-align: left; color: #444466; font-weight: normal;
+        font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.07em;
+        padding: 4px 8px 8px 0; border-bottom: 1px solid #111122;
+      }
+      #lp-action-table td {
+        padding: 6px 8px 6px 0; color: #666688;
+        border-bottom: 1px solid #0e0e18;
+      }
+      #lp-action-table td:first-child { color: #8888aa; }
+      #lp-action-table td:nth-child(2) { color: #555577; }
+
+      /* Footer */
+      #lp-footer { text-align: center; font-size: 0.65rem; color: #222233; padding-top: 40px; }
+
+      /* ══════════════════════════════════════════════════════════════════════
+         CHARACTER CREATOR
+      ══════════════════════════════════════════════════════════════════════ */
+      #cc-wrap {
+        min-height: 100vh; display: flex; align-items: flex-start;
+        justify-content: center; padding: 40px 24px 80px;
+      }
+      #cc-inner { width: 100%; max-width: 900px; }
+      #cc-header { margin-bottom: 32px; }
+      #cc-title { font-size: 1.2rem; color: #bbbbee; letter-spacing: 0.04em; margin-bottom: 8px; }
+      #cc-subtitle { font-size: 0.75rem; color: #555577; line-height: 1.6; }
+
+      #cc-name-row {
+        display: flex; align-items: center; gap: 14px;
+        margin-bottom: 28px;
+      }
+      #cc-name-row label {
+        font-size: 0.65rem; color: #444466; text-transform: uppercase;
+        letter-spacing: 0.08em; white-space: nowrap;
+      }
+      #cc-name-input {
+        flex: 1; max-width: 320px;
+        background: #080810; border: 1px solid #222230; color: #aaaacc;
+        font-family: inherit; font-size: 0.85rem; padding: 9px 12px;
+        border-radius: 3px; outline: none;
+      }
+      #cc-name-input:focus { border-color: #4444aa; }
+
+      #cc-archetype-label {
+        font-size: 0.62rem; color: #333355; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-bottom: 14px;
+      }
+      #cc-archetype-grid {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+        margin-bottom: 28px;
+      }
+      .cc-archetype-card {
+        background: #0c0c18; border: 1px solid #1a1a2c;
+        border-radius: 4px; padding: 14px 12px;
+        cursor: pointer; text-align: left;
+        font-family: inherit;
+        transition: border-color 0.15s;
+      }
+      .cc-archetype-card:hover { border-color: #333355; }
+      .cc-archetype-card.selected { border-color: #5555aa; background: #0f0f20; }
+      .cca-glyph { font-size: 1.2rem; color: #5555aa; margin-bottom: 8px; }
+      .cca-label { font-size: 0.8rem; color: #9999cc; letter-spacing: 0.04em; margin-bottom: 3px; }
+      .cca-tagline { font-size: 0.65rem; color: #555577; font-style: italic; margin-bottom: 10px; line-height: 1.4; }
+      .cca-desc { font-size: 0.68rem; color: #4a4a66; line-height: 1.6; margin-bottom: 12px; }
+      .cca-stats { display: flex; flex-direction: column; gap: 4px; }
+      .cca-stat-row { display: flex; align-items: center; gap: 6px; font-size: 0.62rem; color: #333355; }
+      .cca-stat-row span { width: 38px; flex-shrink: 0; }
+      .cc-stat-bar-bg { flex: 1; height: 3px; background: #111122; border-radius: 2px; }
+      .cc-stat-bar-fill { height: 3px; background: #4444aa; border-radius: 2px; }
+      .cc-archetype-card.selected .cc-stat-bar-fill { background: #7777cc; }
+
+      #cc-confirm-row { display: flex; align-items: center; gap: 16px; }
+      #cc-submit {
+        background: #1a1a3a; border: 1px solid #4444aa; color: #aaaadd;
+        font-family: inherit; font-size: 0.8rem; padding: 10px 24px;
+        border-radius: 3px; cursor: pointer; letter-spacing: 0.06em;
+        transition: background 0.15s;
+      }
+      #cc-submit:hover:not(:disabled) { background: #252550; }
+      #cc-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+      #cc-msg { font-size: 0.72rem; color: #cc7777; }
+
+      /* ══════════════════════════════════════════════════════════════════════
+         GAME SCREEN
+      ══════════════════════════════════════════════════════════════════════ */
+      #game-screen { display: none; flex-direction: column; height: 100vh; overflow: hidden; }
+      #game-screen.active { display: flex; }
+
       #top-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #111118; border-bottom: 1px solid #222230; flex-shrink: 0; }
       #logo { display: flex; align-items: center; gap: 8px; }
       #logo svg { width: 28px; height: 28px; }
@@ -30,25 +252,9 @@
       #mode-toggle { background: none; border: 1px solid #333355; color: #666688; font-family: inherit; font-size: 0.6rem; padding: 2px 6px; border-radius: 3px; cursor: pointer; }
       #mode-toggle:hover { border-color: #5555aa; color: #9999cc; }
       #action-panel { display: flex; flex-direction: column; gap: 6px; }
-      .action-btn {
-        background: #111120;
-        border: 1px solid #2a2a40;
-        color: #8888bb;
-        padding: 7px 10px;
-        font-family: inherit;
-        font-size: 0.75rem;
-        text-align: left;
-        cursor: pointer;
-        border-radius: 3px;
-        transition: border-color 0.15s, color 0.15s;
-      }
+      .action-btn { background: #111120; border: 1px solid #2a2a40; color: #8888bb; padding: 7px 10px; font-family: inherit; font-size: 0.75rem; text-align: left; cursor: pointer; border-radius: 3px; transition: border-color 0.15s, color 0.15s; }
       .action-btn:hover:not(:disabled) { border-color: #6666cc; color: #ccccff; }
-      .action-btn:disabled {
-        opacity: 0.3;
-        cursor: not-allowed;
-        color: #555577;
-        border-color: #1a1a2a;
-      }
+      .action-btn:disabled { opacity: 0.3; cursor: not-allowed; color: #555577; border-color: #1a1a2a; }
       #cmd-panel { display: none; }
       #cmd-input-wrap { display: flex; align-items: center; gap: 6px; }
       #cmd-prefix { color: #444466; font-size: 0.8rem; }
@@ -66,37 +272,36 @@
       #stat-deltas { padding: 6px 12px; font-size: 0.7rem; color: #666688; border-bottom: 1px solid #1a1a28; min-height: 22px; }
       .delta-pos { color: #66cc88; }
       .delta-neg { color: #cc6677; }
+      #snapshot-panel { display: none; padding: 8px 12px; border-bottom: 1px solid #1a1a28; font-size: 0.68rem; color: #7777aa; background: #0d0d1a; }
+      #snapshot-panel .snap-label { color: #444466; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+      #snapshot-panel .snap-row { display: flex; flex-wrap: wrap; gap: 6px; }
+      #snapshot-panel .snap-stat { color: #8899bb; }
       #world-log { flex: 1; overflow-y: auto; padding: 8px 12px; font-size: 0.7rem; }
       .log-entry { padding: 3px 0; border-bottom: 1px solid #111120; color: #555577; line-height: 1.4; }
       .log-entry .actor { color: #7777aa; }
       .log-entry .action-type { color: #555599; font-size: 0.65rem; }
       .log-entry .tick { color: #333355; font-size: 0.62rem; float: right; }
-      #travel-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
-      #travel-modal.open { display: flex; }
-      #travel-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 280px; }
-      #travel-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 12px; letter-spacing: 0.06em; }
+
+      /* Modals */
+      #travel-modal, #target-modal, #amount-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+      #travel-modal.open, #target-modal.open, #amount-modal.open { display: flex; }
+      #travel-modal-inner, #target-modal-inner, #amount-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; }
+      #travel-modal-inner { width: 280px; }
+      #travel-modal-inner h3, #target-modal-inner h3, #amount-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 12px; letter-spacing: 0.06em; }
       .compass-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
       .compass-btn { background: #1a1a2e; border: 1px solid #2a2a44; color: #8888bb; padding: 10px; font-family: inherit; font-size: 0.8rem; border-radius: 3px; cursor: pointer; text-align: center; }
       .compass-btn:hover:not(:disabled) { border-color: #5555aa; color: #ccccff; }
       .compass-btn:disabled { opacity: 0.25; cursor: not-allowed; }
       .compass-btn.center { background: none; border: none; color: #333355; cursor: default; }
       #travel-cost-info { font-size: 0.7rem; color: #555577; margin-bottom: 10px; }
-      #travel-cancel { background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 6px 12px; border-radius: 3px; cursor: pointer; width: 100%; }
-      #travel-cancel:hover { border-color: #444466; color: #8888aa; }
-      #target-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
-      #target-modal.open { display: flex; }
-      #target-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 300px; max-height: 400px; display: flex; flex-direction: column; }
-      #target-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 4px; letter-spacing: 0.06em; }
+      #travel-cancel, #target-cancel { background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 6px 12px; border-radius: 3px; cursor: pointer; width: 100%; }
+      #travel-cancel:hover, #target-cancel:hover { border-color: #444466; color: #8888aa; }
+      #target-modal-inner { width: 300px; max-height: 400px; display: flex; flex-direction: column; }
       #target-modal-subtitle { font-size: 0.7rem; color: #555577; margin-bottom: 12px; }
       #target-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
       .target-btn { background: #1a1a2e; border: 1px solid #2a2a44; color: #8888bb; padding: 8px 12px; font-family: inherit; font-size: 0.75rem; border-radius: 3px; cursor: pointer; text-align: left; }
       .target-btn:hover { border-color: #5555aa; color: #ccccff; }
-      #target-cancel { background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 6px 12px; border-radius: 3px; cursor: pointer; width: 100%; }
-      #target-cancel:hover { border-color: #444466; color: #8888aa; }
-      #amount-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 110; align-items: center; justify-content: center; }
-      #amount-modal.open { display: flex; }
-      #amount-modal-inner { background: #111120; border: 1px solid #333355; border-radius: 6px; padding: 20px; width: 260px; }
-      #amount-modal-inner h3 { font-size: 0.85rem; color: #9999cc; margin-bottom: 8px; }
+      #amount-modal-inner { width: 260px; }
       #amount-input { width: 100%; background: #0a0a14; border: 1px solid #2a2a40; color: #aaaacc; font-family: inherit; font-size: 0.85rem; padding: 8px; border-radius: 3px; outline: none; margin-bottom: 10px; }
       #amount-input:focus { border-color: #5555aa; }
       .amount-btn-row { display: flex; gap: 8px; }
@@ -104,19 +309,12 @@
       #amount-confirm:hover { background: #333366; }
       #amount-cancel { flex: 1; background: none; border: 1px solid #222233; color: #555577; font-family: inherit; font-size: 0.75rem; padding: 7px; border-radius: 3px; cursor: pointer; }
       #amount-cancel:hover { border-color: #444466; color: #8888aa; }
-      /* Snapshot panel — shown after reveal_stat */
-      #snapshot-panel {
-        display: none;
-        padding: 8px 12px;
-        border-bottom: 1px solid #1a1a28;
-        font-size: 0.68rem;
-        color: #7777aa;
-        background: #0d0d1a;
-      }
-      #snapshot-panel .snap-label { color: #444466; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
-      #snapshot-panel .snap-row { display: flex; flex-wrap: wrap; gap: 6px; }
-      #snapshot-panel .snap-stat { color: #8899bb; }
-      @media (max-width: 640px) {
+
+      /* Responsive */
+      @media (max-width: 700px) {
+        #lp-main { grid-template-columns: 1fr; }
+        #lp-mechanic-cards { grid-template-columns: 1fr; }
+        #cc-archetype-grid { grid-template-columns: repeat(2, 1fr); }
         #sidebar { width: 100%; height: 220px; border-left: none; border-top: 1px solid #222230; }
         #main-layout { flex-direction: column; }
         #action-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -125,141 +323,137 @@
     </style>
   </head>
   <body>
-    <div id="top-bar">
-      <div id="logo">
-        <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Chronicle Worlds">
-          <circle cx="14" cy="14" r="12" stroke="#5555aa" stroke-width="1.5"/>
-          <ellipse cx="14" cy="14" rx="5" ry="12" stroke="#5555aa" stroke-width="1"/>
-          <line x1="2" y1="14" x2="26" y2="14" stroke="#5555aa" stroke-width="1"/>
-          <line x1="4" y1="8" x2="24" y2="8" stroke="#333366" stroke-width="0.75"/>
-          <line x1="4" y1="20" x2="24" y2="20" stroke="#333366" stroke-width="0.75"/>
-          <circle cx="14" cy="14" r="2" fill="#7777cc"/>
-        </svg>
-        <span id="logo-text">CHRONICLE WORLDS</span>
-      </div>
-      <div id="status">connecting…</div>
-    </div>
 
-    <div id="main-layout">
-      <div id="canvas-container">
-        <canvas id="grid-canvas"></canvas>
+    <!-- ══ LANDING / CHARACTER CREATOR SCREEN ══ -->
+    <div id="landing-screen"></div>
+
+    <!-- ══ GAME SCREEN ══ -->
+    <div id="game-screen">
+      <div id="top-bar">
+        <div id="logo">
+          <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Chronicle Worlds">
+            <circle cx="14" cy="14" r="12" stroke="#5555aa" stroke-width="1.5"/>
+            <ellipse cx="14" cy="14" rx="5" ry="12" stroke="#5555aa" stroke-width="1"/>
+            <line x1="2" y1="14" x2="26" y2="14" stroke="#5555aa" stroke-width="1"/>
+            <line x1="4" y1="8" x2="24" y2="8" stroke="#333366" stroke-width="0.75"/>
+            <line x1="4" y1="20" x2="24" y2="20" stroke="#333366" stroke-width="0.75"/>
+            <circle cx="14" cy="14" r="2" fill="#7777cc"/>
+          </svg>
+          <span id="logo-text">CHRONICLE WORLDS</span>
+        </div>
+        <div id="status">connecting…</div>
       </div>
 
-      <div id="sidebar">
-        <div id="char-info">
-          <div class="label">Character</div>
-          <div class="value" id="char-name">—</div>
-          <div class="label">Archetype</div>
-          <div class="value" id="char-archetype">—</div>
-          <div class="label">Stats</div>
-          <div class="value" id="char-stats">—</div>
+      <div id="main-layout">
+        <div id="canvas-container">
+          <canvas id="grid-canvas"></canvas>
         </div>
 
-        <div id="char-pos-panel">
-          <span class="pos-label">Position </span>
-          <span class="pos-val" id="char-pos-xyz">—</span>
-          <div class="setting-desc" id="char-setting-desc"></div>
-          <div id="z-layer-badge-wrap"><span class="z-layer-badge" id="z-layer-badge"></span></div>
-        </div>
-
-        <div id="action-area">
-          <div class="section-label">
-            <span id="mode-label">ACTIONS</span>
-            <button id="mode-toggle">TEXT</button>
+        <div id="sidebar">
+          <div id="char-info">
+            <div class="label">Character</div>
+            <div class="value" id="char-name">—</div>
+            <div class="label">Archetype</div>
+            <div class="value" id="char-archetype">—</div>
+            <div class="label">Stats</div>
+            <div class="value" id="char-stats">—</div>
           </div>
 
-          <div id="action-panel">
-            <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
-            <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
-            <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
-            <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
-            <button class="action-btn" data-action="reveal_stat">Observe <span style="color:#444">[8u]</span></button>
-            <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
-            <button class="action-btn" data-action="rest">Rest <span style="color:#444">[15u]</span></button>
+          <div id="char-pos-panel">
+            <span class="pos-label">Position </span>
+            <span class="pos-val" id="char-pos-xyz">—</span>
+            <div class="setting-desc" id="char-setting-desc"></div>
+            <div id="z-layer-badge-wrap"><span class="z-layer-badge" id="z-layer-badge"></span></div>
           </div>
 
-          <div id="cmd-panel">
-            <div id="cmd-input-wrap">
-              <span id="cmd-prefix">&gt;</span>
-              <input id="cmd-input" type="text" placeholder="enter command…" autocomplete="off" spellcheck="false" />
+          <div id="action-area">
+            <div class="section-label">
+              <span id="mode-label">ACTIONS</span>
+              <button id="mode-toggle">TEXT</button>
             </div>
-            <div id="cmd-log"></div>
+
+            <div id="action-panel">
+              <button class="action-btn" data-action="exchange_information">Exchange Information <span style="color:#444">[10u]</span></button>
+              <button class="action-btn" data-action="resolve_conflict">Resolve Conflict <span style="color:#444">[7u]</span></button>
+              <button class="action-btn" data-action="introduce_conflict">Introduce Conflict <span style="color:#444">[5u]</span></button>
+              <button class="action-btn" data-action="exchange_material">Exchange Material <span style="color:#444">[3u]</span></button>
+              <button class="action-btn" data-action="reveal_stat">Observe <span style="color:#444">[8u]</span></button>
+              <button class="action-btn" data-action="travel">Travel <span style="color:#444">[calc]</span></button>
+              <button class="action-btn" data-action="rest">Rest <span style="color:#444">[15u]</span></button>
+            </div>
+
+            <div id="cmd-panel">
+              <div id="cmd-input-wrap">
+                <span id="cmd-prefix">&gt;</span>
+                <input id="cmd-input" type="text" placeholder="enter command…" autocomplete="off" spellcheck="false" />
+              </div>
+              <div id="cmd-log"></div>
+            </div>
           </div>
+
+          <div id="cooldown-bar-wrap">
+            <div id="cooldown-label">COOLDOWN</div>
+            <div id="cooldown-bar-bg"><div id="cooldown-bar-fill"></div></div>
+          </div>
+
+          <div id="stat-deltas"></div>
+
+          <div id="snapshot-panel">
+            <div class="snap-label">Observed</div>
+            <div class="snap-row" id="snapshot-row"></div>
+          </div>
+
+          <div id="world-log"></div>
         </div>
-
-        <div id="cooldown-bar-wrap">
-          <div id="cooldown-label">COOLDOWN</div>
-          <div id="cooldown-bar-bg"><div id="cooldown-bar-fill"></div></div>
-        </div>
-
-        <div id="stat-deltas"></div>
-
-        <!-- Snapshot panel: revealed target stats (only visible after observe) -->
-        <div id="snapshot-panel">
-          <div class="snap-label">Observed</div>
-          <div class="snap-row" id="snapshot-row"></div>
-        </div>
-
-        <div id="world-log"></div>
       </div>
-    </div>
 
-    <!-- Travel modal -->
-    <div id="travel-modal" role="dialog" aria-modal="true" aria-labelledby="travel-modal-title">
-      <div id="travel-modal-inner">
-        <h3 id="travel-modal-title">TRAVEL</h3>
-        <div class="compass-grid">
-          <button class="compass-btn" data-dir="nw">NW</button>
-          <button class="compass-btn" data-dir="n">N</button>
-          <button class="compass-btn" data-dir="ne">NE</button>
-          <button class="compass-btn" data-dir="w">W</button>
-          <button class="compass-btn center" disabled>◆</button>
-          <button class="compass-btn" data-dir="e">E</button>
-          <button class="compass-btn" data-dir="sw">SW</button>
-          <button class="compass-btn" data-dir="s">S</button>
-          <button class="compass-btn" data-dir="se">SE</button>
+      <!-- Travel modal -->
+      <div id="travel-modal" role="dialog" aria-modal="true" aria-labelledby="travel-modal-title">
+        <div id="travel-modal-inner">
+          <h3 id="travel-modal-title">TRAVEL</h3>
+          <div class="compass-grid">
+            <button class="compass-btn" data-dir="nw">NW</button>
+            <button class="compass-btn" data-dir="n">N</button>
+            <button class="compass-btn" data-dir="ne">NE</button>
+            <button class="compass-btn" data-dir="w">W</button>
+            <button class="compass-btn center" disabled>◆</button>
+            <button class="compass-btn" data-dir="e">E</button>
+            <button class="compass-btn" data-dir="sw">SW</button>
+            <button class="compass-btn" data-dir="s">S</button>
+            <button class="compass-btn" data-dir="se">SE</button>
+          </div>
+          <div id="travel-z-row" style="display:flex;gap:6px;margin-bottom:10px;">
+            <button class="compass-btn" data-dir="up" id="travel-up-btn" style="flex:1">UP ▲</button>
+            <button class="compass-btn" data-dir="down" id="travel-down-btn" style="flex:1">▼ DOWN</button>
+          </div>
+          <div id="travel-cost-info">cost: calculating…</div>
+          <button id="travel-cancel">CANCEL</button>
         </div>
-        <div id="travel-z-row" style="display:flex;gap:6px;margin-bottom:10px;">
-          <button class="compass-btn" data-dir="up" id="travel-up-btn" style="flex:1">UP ▲</button>
-          <button class="compass-btn" data-dir="down" id="travel-down-btn" style="flex:1">▼ DOWN</button>
+      </div>
+
+      <!-- Target picker modal -->
+      <div id="target-modal" role="dialog" aria-modal="true" aria-labelledby="target-modal-title">
+        <div id="target-modal-inner">
+          <h3 id="target-modal-title">SELECT TARGET</h3>
+          <div id="target-modal-subtitle">choose a character at your location</div>
+          <div id="target-list"></div>
+          <button id="target-cancel">CANCEL</button>
         </div>
-        <div id="travel-cost-info">cost: calculating…</div>
-        <button id="travel-cancel">CANCEL</button>
       </div>
-    </div>
 
-    <!-- Target picker modal -->
-    <div id="target-modal" role="dialog" aria-modal="true" aria-labelledby="target-modal-title">
-      <div id="target-modal-inner">
-        <h3 id="target-modal-title">SELECT TARGET</h3>
-        <div id="target-modal-subtitle">choose a character at your location</div>
-        <div id="target-list"></div>
-        <button id="target-cancel">CANCEL</button>
-      </div>
-    </div>
-
-    <!-- Amount modal -->
-    <div id="amount-modal" role="dialog" aria-modal="true" aria-labelledby="amount-modal-title">
-      <div id="amount-modal-inner">
-        <h3 id="amount-modal-title">EXCHANGE MATERIAL</h3>
-        <input id="amount-input" type="number" min="1" placeholder="amount…" />
-        <div class="amount-btn-row">
-          <button id="amount-confirm">CONFIRM</button>
-          <button id="amount-cancel">CANCEL</button>
+      <!-- Amount modal -->
+      <div id="amount-modal" role="dialog" aria-modal="true" aria-labelledby="amount-modal-title">
+        <div id="amount-modal-inner">
+          <h3 id="amount-modal-title">EXCHANGE MATERIAL</h3>
+          <input id="amount-input" type="number" min="1" placeholder="amount…" />
+          <div class="amount-btn-row">
+            <button id="amount-confirm">CONFIRM</button>
+            <button id="amount-cancel">CANCEL</button>
+          </div>
         </div>
       </div>
     </div>
 
     <script type="module" src="./src/app.js"></script>
-    <script>
-      const sidebar = document.getElementById('sidebar')
-      const toggle  = document.getElementById('mode-toggle')
-      if (window.innerWidth <= 640 && toggle) {
-        toggle.addEventListener('click', () => {
-          const isOpen = sidebar.classList.toggle('open')
-          toggle.innerHTML = isOpen ? 'ACTIONS &#9660;' : 'ACTIONS &#9650;'
-        })
-      }
-    </script>
   </body>
 </html>
