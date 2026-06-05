@@ -1,11 +1,11 @@
-// resolve-turn/index.ts  v6
+// resolve-turn/index.ts  v7
 // Handles all 5 player actions: exchange_information, resolve_conflict,
 // introduce_conflict, exchange_material, travel.
-// v6 additions (Option F — Vertical z-Axis Physics):
-//   - travel: blocked if destination z≥1 and character.flight=0
-//             blocked if destination z≤-2 and character.breath=0
-//   - introduce_conflict: +2 health damage bonus when actor z > target z (height advantage)
-// Depends on: migrations 001–017.
+// v7 changes (Milestone 22 — Option G completion):
+//   - introduce_conflict height-advantage bonus is now data-driven from
+//     z_properties.conflict_modifier instead of hardcoded +2.
+//     Effective bonus = FLOOR(actorModifier - targetModifier), minimum 0.
+// Depends on: migrations 001–018.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -19,7 +19,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Base duration units for non-travel actions (1 unit = 1/100 of a time unit)
+// Base duration units for non-travel actions
 const DURATION_MAP: Record<string, number> = {
   exchange_information: 10,
   resolve_conflict: 7,
@@ -97,7 +97,6 @@ async function applyModifier(
     ? (details.target_character_id ?? actorCharacterId)
     : actorCharacterId;
 
-  // Effective value includes any height advantage bonus
   const effectiveValue = spec.value + (spec.operator === '-' ? damageBonus : 0);
 
   await supabase.from('attribute_modifiers').insert({
@@ -135,7 +134,6 @@ async function applyModifier(
 // z helpers
 // ---------------------------------------------------------------------------
 
-// Returns the z value of the grid_cell a character currently occupies.
 async function getCharacterZ(
   supabase: SupabaseClient,
   characterId: number
@@ -152,7 +150,6 @@ async function getCharacterZ(
   return cell?.z ?? null;
 }
 
-// Returns the z value of a specific grid_cell by id.
 async function getCellZ(
   supabase: SupabaseClient,
   gridCellId: number
@@ -163,6 +160,19 @@ async function getCellZ(
     .eq('grid_cell_id', gridCellId)
     .single();
   return (data as { z?: number } | null)?.z ?? null;
+}
+
+// Returns conflict_modifier for a given z layer. Defaults to 0.
+async function getConflictModifier(
+  supabase: SupabaseClient,
+  z: number
+): Promise<number> {
+  const { data } = await supabase
+    .from('z_properties')
+    .select('conflict_modifier')
+    .eq('z_layer', z)
+    .single();
+  return (data as { conflict_modifier?: number } | null)?.conflict_modifier ?? 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,10 +223,6 @@ async function handleExchangeMaterial(
 
 // ---------------------------------------------------------------------------
 // travel: z-guard then position update
-// Blocks move if:
-//   destination z >= 1 and character.flight = 0
-//   destination z <= -2 and character.breath = 0
-// Returns an error string if blocked, null if allowed.
 // ---------------------------------------------------------------------------
 
 async function handleTravel(
@@ -231,7 +237,6 @@ async function handleTravel(
   const destZ = await getCellZ(supabase, destCellId);
 
   if (destZ !== null) {
-    // Fetch actor's flight + breath
     const { data: charData } = await supabase
       .from('characters')
       .select('flight, breath')
@@ -249,7 +254,6 @@ async function handleTravel(
     }
   }
 
-  // Guard passed — execute position update
   await supabase
     .from('entity_positions')
     .update({ timestamp_end: now })
@@ -294,9 +298,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // ------------------------------------------------------------------
-    // 1. Race resolution — check queue position
-    // ------------------------------------------------------------------
+    // 1. Race resolution
     const { data: queue } = await supabase
       .from('turn_queue')
       .select('queue_pos')
@@ -310,9 +312,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // ------------------------------------------------------------------
     // 2. Resolve player → character
-    // ------------------------------------------------------------------
     const { data: player, error: playerErr } = await supabase
       .from('players')
       .select('controlled_character_id')
@@ -327,9 +327,7 @@ serve(async (req: Request) => {
     }
     const characterId: number = player.controlled_character_id;
 
-    // ------------------------------------------------------------------
     // 3. Validate action and compute duration
-    // ------------------------------------------------------------------
     let duration: number;
     if (action === 'travel') {
       duration = computeTravelDuration(details);
@@ -347,9 +345,7 @@ serve(async (req: Request) => {
     const sequenceIndex: number = details.sequence_index ?? 0;
     const endTimestamp: number = now + duration;
 
-    // ------------------------------------------------------------------
     // 4. Branch fork limit check
-    // ------------------------------------------------------------------
     if (details.branch_fork && details.parent_branch_id !== undefined) {
       const { count } = await supabase
         .from('branches')
@@ -370,9 +366,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // ------------------------------------------------------------------
     // 5. Insert event (pending)
-    // ------------------------------------------------------------------
     const { data: event, error: eventErr } = await supabase
       .from('events')
       .insert({
@@ -399,9 +393,7 @@ serve(async (req: Request) => {
 
     const eventId: number = event.event_id;
 
-    // ------------------------------------------------------------------
     // 6. Action-specific side effects
-    // ------------------------------------------------------------------
     const statDeltas: StatDelta[] = [];
 
     if (action === 'exchange_material') {
@@ -410,7 +402,6 @@ serve(async (req: Request) => {
     } else if (action === 'travel') {
       const travelError = await handleTravel(supabase, characterId, details, now);
       if (travelError) {
-        // Roll back the pending event and return 403
         await supabase.from('events').delete().eq('event_id', eventId);
         return new Response(
           JSON.stringify({ error: travelError }),
@@ -421,13 +412,16 @@ serve(async (req: Request) => {
 
     // Attribute modifier (all non-travel actions)
     if (action !== 'travel') {
-      // Height advantage: introduce_conflict from higher z → +2 damage
+      // Height advantage: data-driven from z_properties.conflict_modifier
+      // Bonus = floor(actorModifier - targetModifier), minimum 0
       let damageBonus = 0;
       if (action === 'introduce_conflict' && details.target_character_id) {
         const actorZ  = await getCharacterZ(supabase, characterId);
         const targetZ = await getCharacterZ(supabase, details.target_character_id);
-        if (actorZ !== null && targetZ !== null && actorZ > targetZ) {
-          damageBonus = 2; // stacks with base -3 → effective -5
+        if (actorZ !== null && targetZ !== null) {
+          const actorMod  = await getConflictModifier(supabase, actorZ);
+          const targetMod = await getConflictModifier(supabase, targetZ);
+          damageBonus = Math.max(0, Math.floor(actorMod - targetMod));
         }
       }
 
@@ -437,9 +431,7 @@ serve(async (req: Request) => {
       if (modDelta) statDeltas.push(modDelta);
     }
 
-    // ------------------------------------------------------------------
     // 7. Insert chronicle entry
-    // ------------------------------------------------------------------
     const { error: chronicleErr } = await supabase.from('chronicle').insert({
       timestamp: now,
       sequence_index: sequenceIndex,
@@ -459,17 +451,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // ------------------------------------------------------------------
     // 8. Mark event resolved
-    // ------------------------------------------------------------------
     await supabase
       .from('events')
       .update({ resolution_state: 'resolved' })
       .eq('event_id', eventId);
 
-    // ------------------------------------------------------------------
     // 9. Broadcast resolved turn
-    // ------------------------------------------------------------------
     await supabase.channel('turns').send({
       type: 'broadcast',
       event: 'turn_resolved',
