@@ -1,11 +1,12 @@
-// resolve-turn/index.ts  v8
+// resolve-turn/index.ts  v9
 // Handles all 6 player actions: exchange_information, resolve_conflict,
 // introduce_conflict, exchange_material, travel, rest.
-// v8 changes (Milestone 23 — Option I: rest as a real action):
-//   - rest: duration 15u, applies +5 health and +2 inspiration to the actor
-//     Both stats applied as attribute_modifiers and immediately written to characters row.
-//     Returns stat_deltas like all other actions.
-// Depends on: migrations 001–018.
+// v9 changes (Milestone 23 — Option K: max_health cap):
+//   - applyOneStat now clamps health writes to characters.max_health.
+//     Reads max_health alongside current health; the written value is
+//     Math.min(current + delta, max_health) for '+' ops on health.
+//     Non-health stats and '-' operators are unaffected.
+// Depends on: migrations 001–019.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -80,6 +81,7 @@ const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
 
 // ---------------------------------------------------------------------------
 // applyOneStat — insert attribute_modifier + update character row immediately
+// Health writes are clamped to max_health.
 // ---------------------------------------------------------------------------
 
 async function applyOneStat(
@@ -105,18 +107,32 @@ async function applyOneStat(
   });
 
   const delta = operator === '+' ? value : -value;
+
+  // Select current value + max_health (only needed for health cap, harmless otherwise)
   const { data: char } = await supabase
     .from('characters')
-    .select(attribute)
+    .select(`${attribute}, max_health`)
     .eq('character_id', characterId)
     .single();
 
   if (char) {
     const current = (char as Record<string, number>)[attribute] ?? 0;
+    let newValue = current + delta;
+
+    // Clamp health to max_health
+    if (attribute === 'health' && operator === '+') {
+      const cap = (char as Record<string, number>).max_health ?? 100;
+      newValue = Math.min(newValue, cap);
+    }
+
+    const actualDelta = newValue - current;
+
     await supabase
       .from('characters')
-      .update({ [attribute]: current + delta })
+      .update({ [attribute]: newValue })
       .eq('character_id', characterId);
+
+    return { attribute, delta: actualDelta, target_character_id: characterId };
   }
 
   return { attribute, delta, target_character_id: characterId };
@@ -148,7 +164,7 @@ async function applyModifier(
 }
 
 // ---------------------------------------------------------------------------
-// rest — +5 health, +2 inspiration to actor
+// rest — +5 health (capped at max_health), +2 inspiration to actor
 // ---------------------------------------------------------------------------
 
 async function handleRest(
@@ -157,7 +173,7 @@ async function handleRest(
   characterId: number,
   now: number
 ): Promise<StatDelta[]> {
-  const healthDelta     = await applyOneStat(supabase, eventId, characterId, 'health',      '+', 5, now);
+  const healthDelta      = await applyOneStat(supabase, eventId, characterId, 'health',      '+', 5, now);
   const inspirationDelta = await applyOneStat(supabase, eventId, characterId, 'inspiration', '+', 2, now);
   return [healthDelta, inspirationDelta];
 }
