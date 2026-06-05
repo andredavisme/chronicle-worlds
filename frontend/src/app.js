@@ -121,16 +121,64 @@ function showSnapshot(snapshot) {
   setTimeout(() => { snapshotPanel.style.display = 'none' }, 12000)
 }
 
-// ─── Character loader ─────────────────────────────────────────────────────────
+// ─── Character loader — uses real schema ──────────────────────────────────────
+// Flow: players → characters → entity_positions → grid_cells
+//       + entity_copies (reality 1) for display name
 async function loadCharacter(userId) {
-  const { data, error } = await supabase
-    .from('entities')
-    .select('id, name, archetype, attributes, x, y, z')
-    .eq('owner_id', userId)
-    .eq('entity_type', 'character')
+  // 1. Get controlled_character_id from players row
+  const { data: playerRow, error: pErr } = await supabase
+    .from('players')
+    .select('controlled_character_id')
+    .eq('player_id', userId)
     .maybeSingle()
-  if (error || !data) return null
-  return data
+  if (pErr || !playerRow || !playerRow.controlled_character_id) return null
+
+  const charId = playerRow.controlled_character_id
+
+  // 2. Get character truth stats
+  const { data: charRow, error: cErr } = await supabase
+    .from('characters')
+    .select('character_id, health, defense, attack, material, wealth, inspiration, size')
+    .eq('character_id', charId)
+    .maybeSingle()
+  if (cErr || !charRow) return null
+
+  // 3. Get current position via entity_positions → grid_cells
+  const { data: posRow, error: posErr } = await supabase
+    .from('entity_positions')
+    .select('grid_cell_id, grid_cells(x, y, z)')
+    .eq('entity_type', 'character')
+    .eq('entity_id', charId)
+    .is('timestamp_end', null)
+    .order('timestamp_start', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const pos = posRow?.grid_cells ?? { x: 0, y: 0, z: 0 }
+
+  // 4. Get display name + archetype from entity_copies (root reality)
+  const { data: copyRow } = await supabase
+    .from('entity_copies')
+    .select('name, local_attributes')
+    .eq('reality_id', 1)
+    .eq('truth_entity_type', 'character')
+    .eq('truth_entity_id', charId)
+    .maybeSingle()
+
+  return {
+    id:        charId,
+    name:      copyRow?.name ?? `Character #${charId}`,
+    archetype: copyRow?.local_attributes?.archetype ?? 'wanderer',
+    attributes: {
+      health:      charRow.health,
+      defense:     charRow.defense,
+      attack:      charRow.attack,
+      wealth:      charRow.wealth,
+      inspiration: charRow.inspiration,
+    },
+    x: pos.x ?? 0,
+    y: pos.y ?? 0,
+    z: pos.z ?? 0,
+  }
 }
 
 // ─── Position display ─────────────────────────────────────────────────────────
@@ -237,20 +285,40 @@ function openTargetModal(action) {
     targetSubtitle.textContent = `action: ${action.replace(/_/g, ' ')}`
     targetList.innerHTML = '<div style="color:#555577;font-size:0.75rem;">loading…</div>'
     targetModal.classList.add('open')
-    supabase.from('entities').select('id, name, archetype')
-      .eq('x', x).eq('y', y).eq('z', z ?? 0)
-      .eq('entity_type', 'character').neq('id', characterId)
-      .then(({ data }) => {
+
+    // Find other characters at same grid cell via entity_positions → grid_cells
+    supabase
+      .from('entity_positions')
+      .select('entity_id, grid_cells!inner(x, y, z)')
+      .eq('entity_type', 'character')
+      .is('timestamp_end', null)
+      .eq('grid_cells.x', x)
+      .eq('grid_cells.y', y)
+      .eq('grid_cells.z', z ?? 0)
+      .neq('entity_id', characterId)
+      .then(async ({ data: positions }) => {
         targetList.innerHTML = ''
-        if (!data || data.length === 0) {
+        if (!positions || positions.length === 0) {
           targetList.innerHTML = '<div style="color:#555577;font-size:0.75rem;">no characters here</div>'
           return
         }
-        data.forEach(char => {
+        // Fetch display names from entity_copies
+        const ids = positions.map(p => p.entity_id)
+        const { data: copies } = await supabase
+          .from('entity_copies')
+          .select('truth_entity_id, name, local_attributes')
+          .eq('reality_id', 1)
+          .eq('truth_entity_type', 'character')
+          .in('truth_entity_id', ids)
+
+        positions.forEach(pos => {
+          const copy = copies?.find(c => c.truth_entity_id === pos.entity_id)
           const btn = document.createElement('button')
           btn.className = 'target-btn'
-          btn.textContent = `${char.name} (${char.archetype})`
-          btn.onclick = () => { targetModal.classList.remove('open'); resolve(char.id) }
+          btn.textContent = copy
+            ? `${copy.name} (${copy.local_attributes?.archetype ?? '?'})`
+            : `Character #${pos.entity_id}`
+          btn.onclick = () => { targetModal.classList.remove('open'); resolve(pos.entity_id) }
           targetList.appendChild(btn)
         })
       })
@@ -534,22 +602,29 @@ async function initGame(user, char) {
   if (recentEvents) recentEvents.reverse().forEach(appendToWorldLog)
 }
 
+// ─── Player count for landing page ───────────────────────────────────────────
+// Correct query: count players who have a character assigned
+// (used by landing.js fetchPlayerCount — re-exported here for completeness)
+export async function fetchPlayerCount() {
+  const { count } = await supabase
+    .from('players')
+    .select('controlled_character_id', { count: 'exact', head: true })
+    .not('controlled_character_id', 'is', null)
+  return count ?? 0
+}
+
 // ─── Auth bootstrap ───────────────────────────────────────────────────────────
 onAuthChange(async user => {
   if (!user) {
-    // Not signed in — show landing
     renderLanding()
     return
   }
 
-  // Signed in — check for character
   const char = await loadCharacter(user.id)
 
   if (char) {
-    // Returning player — go straight to game
     await initGame(user, char)
   } else {
-    // New player — show character creator
     renderCharacterCreator(user.id, async (newChar) => {
       await initGame(user, newChar)
     })
