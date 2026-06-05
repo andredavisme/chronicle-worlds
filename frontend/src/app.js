@@ -150,16 +150,16 @@ async function updatePositionDisplay(x, y, z) {
     charSettingEl.textContent = ''
   }
 
-  // z-layer badge
+  // z-layer badge — fixed: column is z_layer (not z), field is layer_name (not label)
   const zVal = z ?? 0
   const { data: zRow } = await supabase
     .from('z_properties')
-    .select('label, movement_type')
-    .eq('z', zVal)
+    .select('layer_name, requires_flight')
+    .eq('z_layer', zVal)
     .maybeSingle()
 
   if (zRow) {
-    zLayerBadgeEl.textContent = `z${zVal}: ${zRow.label}`
+    zLayerBadgeEl.textContent = `z${zVal}: ${zRow.layer_name}`
     zLayerBadgeEl.style.display = 'inline-block'
   } else {
     zLayerBadgeEl.textContent = `z${zVal}`

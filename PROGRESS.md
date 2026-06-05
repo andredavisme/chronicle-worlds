@@ -80,54 +80,52 @@ All prior milestones complete. Schema, Edge Functions, frontend scaffold, Realti
 
 ### ✅ Milestone 22 — Option G: z-Axis Physical Mechanics (data-driven)
 **Date:** 2026-06-05 | **Status:** Complete
-**Migration:** `018_z_conflict_modifier` | **Edge Function:** `resolve-turn` (v7, ACTIVE) | **Commit:** this commit
+**Migration:** `018_z_conflict_modifier` | **Edge Function:** `resolve-turn` (v7, ACTIVE) | **Commit:** `8e9893e`
 
-**Context:** Prior to this milestone, `world_tick()` already had gravity (fall 1z/tick, -5 fall damage from z≥2) and breath-decay wired. `resolve-turn` v6 already blocked travel by flight/breath. The remaining gap was that height-advantage conflict damage was hardcoded as `+2` instead of being data-driven from `z_properties`.
+- Migration `018`: `conflict_modifier NUMERIC` added to `z_properties`, seeded per layer (−1.5 to +1.5)
+- `resolve-turn` v7: height-advantage bonus = `floor(actorMod − targetMod)`, min 0 — replaces hardcoded +2
+- `getConflictModifier()` helper added; defaults to 0 on missing row
+
+---
+
+### ✅ Milestone 23 — Option I: rest as a real action
+**Date:** 2026-06-05 | **Status:** Complete
+**Edge Function:** `resolve-turn` (v8, ACTIVE) | **Files:** `functions/resolve-turn/index.ts`, `frontend/src/app.js` | **Commit:** this commit
 
 **What was done:**
 
-**Migration `018_z_conflict_modifier`:**
-- Added `conflict_modifier NUMERIC NOT NULL DEFAULT 0` to `z_properties`
-- Seeded per layer:
-  - `z=-3` (abyss): −1.5 (severe submerged disadvantage)
-  - `z=-2` (deep water): −1.0
-  - `z=-1` (shallow water): −0.5
-  - `z=0` (ground): 0.0 (neutral)
-  - `z=1` (air): +0.5
-  - `z=2` (high air): +1.0
-  - `z=3` (void): +1.5
+**`resolve-turn` v8:**
+- Added `rest` to `DURATION_MAP` with duration 15u (longest of all actions — rest takes time)
+- `handleRest()` function: calls `applyOneStat()` twice — `+5 health` and `+2 inspiration` to the actor
+- `applyOneStat()` helper extracted from `applyModifier` for reuse on multi-stat actions
+- `rest` now appears in the event log with `event_type = 'rest'` and returns `stat_deltas` like all other actions
+- Action branch order: rest → exchange_material → travel → social actions
 
-**Edge Function `resolve-turn` v7:**
-- Added `getConflictModifier(supabase, z)` — queries `z_properties.conflict_modifier` for a given z layer
-- `introduce_conflict` height bonus now computed as: `damageBonus = Math.max(0, Math.floor(actorMod - targetMod))`
-  - Example: actor at z=2 (+1.0) attacks target at z=0 (0.0) → bonus = floor(1.0) = +1 extra damage
-  - Example: actor at z=1 (+0.5) attacks target at z=0 (0.0) → bonus = floor(0.5) = 0 (no bonus until full integer)
-  - Example: actor at z=3 (+1.5) attacks target at z=-1 (−0.5) → bonus = floor(2.0) = +2
-  - Submerged attackers get 0 bonus (min 0 clamp)
-- Old hardcoded `damageBonus = 2` removed
+**`app.js` bug fix — z_properties query:**
+- `updatePositionDisplay()` was querying `.eq('z', zVal)` — **column does not exist** (correct column: `z_layer`)
+- Was selecting `label` — **field does not exist** (correct field: `layer_name`)
+- Fixed: `.select('layer_name, requires_flight').eq('z_layer', zVal)` — z-layer badge now renders correctly
 
-**`z_properties` full state after this migration:**
-| z | layer_name | requires_flight | requires_breath | health_decay | durability_decay_multiplier | conflict_modifier |
-|---|---|---|---|---|---|---|
-| -3 | abyss | false | true | 3 | 4 | -1.5 |
-| -2 | deep water | false | true | 1 | 3 | -1.0 |
-| -1 | shallow water | false | false | 0 | 2 | -0.5 |
-| 0 | ground | false | false | 0 | 1 | 0.0 |
-| 1 | air | true | false | 0 | 1 | +0.5 |
-| 2 | high air | true | false | 0 | 1 | +1.0 |
-| 3 | void | true | false | 1 | 1 | +1.5 |
+**Frontend rest path (was already wired, now functional):**
+- Button mode: `data-action="rest"` button → `executeAction('rest')` → `submitAction('rest')` → server
+- Text mode: `rest` / `wait` / `idle` → `local: rest` → `executeAction('rest')` → server
+- Both modes show stat deltas (+5 health, +2 inspiration) and start cooldown bar on success
 
-**`world_tick()` z-physics already active (pre-existing):**
-- Fall: character at z≥1 without `flight=1` drops 1z per tick
-- Fall damage: −5 health when falling from z≥2
-- Breath decay: character at z≤-2 without `breath=1` loses `health_decay` HP per tick
-- Material decay: multiplied by `durability_decay_multiplier` at the material's z layer
+**Action duration table (complete):**
+| Action | Duration units |
+|---|---|
+| exchange_information | 10u |
+| resolve_conflict | 7u |
+| introduce_conflict | 5u |
+| exchange_material | 3u |
+| travel | calculated |
+| rest | 15u |
 
 **Key decisions:**
-- `conflict_modifier` is NUMERIC (not INT) — allows half-step tuning (e.g. 0.5) without schema change
-- `Math.floor()` means a bonus only triggers at whole integers — air (0.5) vs ground (0.0) gap is 0.5, not enough for a bonus alone; void (1.5) vs shallow water (−0.5) gap is 2.0 → +2 bonus
-- Negative modifiers for submerged attackers are clamped to 0 — they receive no bonus, but aren't penalised beyond being in a dangerous layer
-- `getConflictModifier` defaults to 0 on missing z row — safe for future z layers outside the seeded range
+- `rest` is the longest fixed-duration action (15u) — makes it a real cost, not a free heal
+- Two separate `attribute_modifiers` rows are inserted (one per stat) with the same `source_entity_id = eventId`
+- Health cap not enforced at DB level yet — future work (could add a CHECK constraint or clamp in `applyOneStat`)
+- `requires_flight` fetched alongside `layer_name` in the badge query — available for future tooltip use
 
 ---
 
@@ -136,11 +134,11 @@ All prior milestones complete. Schema, Edge Functions, frontend scaffold, Realti
 ### Option H — `seed_setting_grid()` z_layers param
 `seed_setting_grid(setting_id, width, height, z_layers)` — spawn multi-storey settings with full z columns. Required before large-scale vertical world generation.
 
-### Option I — Rest as a Real Action
-`rest` submits a no-op turn that still triggers cooldown. Could grant small inspiration or health regen via `applyModifier`. Already wired in command parser as flavour-only.
-
 ### Option J — z-Layer Display Polish
 Front-end: show `conflict_modifier` in the z-layer badge tooltip. Show fall damage warning when entering air without flight. Show health decay countdown for breath layers.
+
+### Option K — Health Cap
+Add a `max_health` column to `characters` (or derive it from attributes). `applyOneStat` clamps health to `[0, max_health]`. Prevents rest spam from inflating health indefinitely.
 
 ---
 
@@ -180,7 +178,7 @@ Front-end: show `conflict_modifier` in the z-layer badge tooltip. Show fall dama
 | Migration 016 | `016_attribute_pool_on_destruction` — attribute_pool table, harvest/draw helpers, destruction triggers, world_tick() patch |
 | Migration 017 | `017_z_properties` — z_properties table, 7 seed rows (z=-3 to z=3), RLS |
 | Migration 018 | `018_z_conflict_modifier` — conflict_modifier NUMERIC column on z_properties, seeded per layer |
-| Edge Function | `resolve-turn` (ID: `a68468fa`, v7, ACTIVE) |
+| Edge Function | `resolve-turn` (ID: `a68468fa`, v8, ACTIVE) |
 | Edge Function | `discover-cell` (ID: `da7a0ccb`, v6, ACTIVE) |
 | pg_cron job | `world-tick` — `* * * * *` — `SELECT public.world_tick();` — ACTIVE |
 | Publishable Key | `sb_publishable_haKvwV0M7KMj4Qz69M6WGg_KmIfU-aI` |
@@ -192,7 +190,7 @@ Front-end: show `conflict_modifier` in the z-layer badge tooltip. Show fall dama
 | Admin player | `7e02b48f-c839-4966-bc71-230e9c5b248c` — `admin@207analytix.com` — char4 |
 | Root timeline | `branch_id = 0` |
 | Max branches/lineage | 3 (enforced in Edge Function) |
-| Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated |
+| Action durations | Exchange Info=10u · Resolve Conflict=7u · Introduce Conflict=5u · Exchange Material=3u · Travel=calculated · Rest=15u |
 | du vs tu | du = real-time ticks (global), tu = story-time per setting |
 | Client cooldown | 1 real minute (UX only) |
 | Default setting_id | `1` (hardcoded in turn-manager.js) |

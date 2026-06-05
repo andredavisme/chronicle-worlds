@@ -1,10 +1,10 @@
-// resolve-turn/index.ts  v7
-// Handles all 5 player actions: exchange_information, resolve_conflict,
-// introduce_conflict, exchange_material, travel.
-// v7 changes (Milestone 22 — Option G completion):
-//   - introduce_conflict height-advantage bonus is now data-driven from
-//     z_properties.conflict_modifier instead of hardcoded +2.
-//     Effective bonus = FLOOR(actorModifier - targetModifier), minimum 0.
+// resolve-turn/index.ts  v8
+// Handles all 6 player actions: exchange_information, resolve_conflict,
+// introduce_conflict, exchange_material, travel, rest.
+// v8 changes (Milestone 23 — Option I: rest as a real action):
+//   - rest: duration 15u, applies +5 health and +2 inspiration to the actor
+//     Both stats applied as attribute_modifiers and immediately written to characters row.
+//     Returns stat_deltas like all other actions.
 // Depends on: migrations 001–018.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -19,12 +19,12 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Base duration units for non-travel actions
 const DURATION_MAP: Record<string, number> = {
   exchange_information: 10,
   resolve_conflict: 7,
   introduce_conflict: 5,
   exchange_material: 3,
+  rest: 15,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ interface StatDelta {
 }
 
 // ---------------------------------------------------------------------------
-// Attribute modifier map
+// Attribute modifier map (single-modifier actions)
 // ---------------------------------------------------------------------------
 
 interface ModifierSpec {
@@ -76,9 +76,54 @@ const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
   exchange_material:    { target_attribute: 'wealth',      operator: '+', value: 3 },
 };
 
+// rest is handled separately (two modifiers).
+
 // ---------------------------------------------------------------------------
-// Insert attribute_modifier AND apply immediately to character row.
-// For introduce_conflict, damageBonus adds to the base value before applying.
+// applyOneStat — insert attribute_modifier + update character row immediately
+// ---------------------------------------------------------------------------
+
+async function applyOneStat(
+  supabase: SupabaseClient,
+  eventId: number,
+  characterId: number,
+  attribute: string,
+  operator: '+' | '-',
+  value: number,
+  now: number
+): Promise<StatDelta> {
+  await supabase.from('attribute_modifiers').insert({
+    source_entity_type: 'event',
+    source_entity_id: eventId,
+    target_entity_type: 'character',
+    target_entity_id: characterId,
+    target_attribute: attribute,
+    operator,
+    value,
+    priority: 0,
+    start_timestamp: now,
+    end_timestamp: null,
+  });
+
+  const delta = operator === '+' ? value : -value;
+  const { data: char } = await supabase
+    .from('characters')
+    .select(attribute)
+    .eq('character_id', characterId)
+    .single();
+
+  if (char) {
+    const current = (char as Record<string, number>)[attribute] ?? 0;
+    await supabase
+      .from('characters')
+      .update({ [attribute]: current + delta })
+      .eq('character_id', characterId);
+  }
+
+  return { attribute, delta, target_character_id: characterId };
+}
+
+// ---------------------------------------------------------------------------
+// applyModifier — single-modifier actions (shared helper)
 // ---------------------------------------------------------------------------
 
 async function applyModifier(
@@ -99,35 +144,22 @@ async function applyModifier(
 
   const effectiveValue = spec.value + (spec.operator === '-' ? damageBonus : 0);
 
-  await supabase.from('attribute_modifiers').insert({
-    source_entity_type: 'event',
-    source_entity_id: eventId,
-    target_entity_type: 'character',
-    target_entity_id: targetId,
-    target_attribute: spec.target_attribute,
-    operator: spec.operator,
-    value: effectiveValue,
-    priority: 0,
-    start_timestamp: now,
-    end_timestamp: null,
-  });
+  return applyOneStat(supabase, eventId, targetId, spec.target_attribute, spec.operator, effectiveValue, now);
+}
 
-  const delta = spec.operator === '+' ? effectiveValue : -effectiveValue;
-  const { data: char } = await supabase
-    .from('characters')
-    .select(spec.target_attribute)
-    .eq('character_id', targetId)
-    .single();
+// ---------------------------------------------------------------------------
+// rest — +5 health, +2 inspiration to actor
+// ---------------------------------------------------------------------------
 
-  if (char) {
-    const current = (char as Record<string, number>)[spec.target_attribute] ?? 0;
-    await supabase
-      .from('characters')
-      .update({ [spec.target_attribute]: current + delta })
-      .eq('character_id', targetId);
-  }
-
-  return { attribute: spec.target_attribute, delta, target_character_id: targetId };
+async function handleRest(
+  supabase: SupabaseClient,
+  eventId: number,
+  characterId: number,
+  now: number
+): Promise<StatDelta[]> {
+  const healthDelta     = await applyOneStat(supabase, eventId, characterId, 'health',      '+', 5, now);
+  const inspirationDelta = await applyOneStat(supabase, eventId, characterId, 'inspiration', '+', 2, now);
+  return [healthDelta, inspirationDelta];
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +194,6 @@ async function getCellZ(
   return (data as { z?: number } | null)?.z ?? null;
 }
 
-// Returns conflict_modifier for a given z layer. Defaults to 0.
 async function getConflictModifier(
   supabase: SupabaseClient,
   z: number
@@ -222,7 +253,7 @@ async function handleExchangeMaterial(
 }
 
 // ---------------------------------------------------------------------------
-// travel: z-guard then position update
+// travel
 // ---------------------------------------------------------------------------
 
 async function handleTravel(
@@ -331,7 +362,7 @@ serve(async (req: Request) => {
     let duration: number;
     if (action === 'travel') {
       duration = computeTravelDuration(details);
-    } else if (DURATION_MAP[action]) {
+    } else if (DURATION_MAP[action] !== undefined) {
       duration = DURATION_MAP[action];
     } else {
       return new Response(
@@ -396,7 +427,10 @@ serve(async (req: Request) => {
     // 6. Action-specific side effects
     const statDeltas: StatDelta[] = [];
 
-    if (action === 'exchange_material') {
+    if (action === 'rest') {
+      const deltas = await handleRest(supabase, eventId, characterId, now);
+      statDeltas.push(...deltas);
+    } else if (action === 'exchange_material') {
       const deltas = await handleExchangeMaterial(supabase, characterId, details);
       statDeltas.push(...deltas);
     } else if (action === 'travel') {
@@ -408,12 +442,8 @@ serve(async (req: Request) => {
           { status: 403, headers: CORS_HEADERS }
         );
       }
-    }
-
-    // Attribute modifier (all non-travel actions)
-    if (action !== 'travel') {
-      // Height advantage: data-driven from z_properties.conflict_modifier
-      // Bonus = floor(actorModifier - targetModifier), minimum 0
+    } else {
+      // exchange_information, resolve_conflict, introduce_conflict
       let damageBonus = 0;
       if (action === 'introduce_conflict' && details.target_character_id) {
         const actorZ  = await getCharacterZ(supabase, characterId);
@@ -424,10 +454,7 @@ serve(async (req: Request) => {
           damageBonus = Math.max(0, Math.floor(actorMod - targetMod));
         }
       }
-
-      const modDelta = await applyModifier(
-        supabase, action, eventId, characterId, details, now, damageBonus
-      );
+      const modDelta = await applyModifier(supabase, action, eventId, characterId, details, now, damageBonus);
       if (modDelta) statDeltas.push(modDelta);
     }
 
