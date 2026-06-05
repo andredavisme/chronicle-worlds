@@ -9,6 +9,7 @@ const TARGET_ACTIONS = new Set([
   'resolve_conflict',
   'introduce_conflict',
   'exchange_material',
+  'reveal_stat',
 ])
 
 const DIR_VECTORS = {
@@ -32,6 +33,7 @@ const HELP_TEXT = [
   '  fight               — introduce conflict',
   '  resolve             — resolve conflict',
   '  trade [amount]      — exchange material',
+  '  observe / read      — observe a character [8u]',
   '  rest / wait          — rest: health +5, inspiration +2 [15u]',
   '  look                — show current position + z-layer',
   '  help / ?            — show this message',
@@ -63,12 +65,14 @@ const actionPanelDiv  = document.getElementById('action-panel')
 const cmdPanel        = document.getElementById('cmd-panel')
 const cmdInput        = document.getElementById('cmd-input')
 const cmdLog          = document.getElementById('cmd-log')
+const snapshotPanel   = document.getElementById('snapshot-panel')
+const snapshotRow     = document.getElementById('snapshot-row')
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let characterId   = null
 let characterPos  = null   // { x, y, z }
-let pendingAction = null   // { action, targetId? }
-let pendingAmount = null   // resolve fn for amount modal
+let pendingAction = null
+let pendingAmount = null
 let worldEntities = []
 let currentMode   = 'buttons'
 
@@ -92,6 +96,18 @@ function showStatDeltas(deltas) {
   if (!deltas) return
   statDeltasEl.innerHTML = formatStatDeltas(deltas)
   setTimeout(() => { statDeltasEl.innerHTML = '' }, 4000)
+}
+
+// Show revealed stat snapshot in the snapshot panel
+function showSnapshot(snapshot) {
+  if (!snapshot) { snapshotPanel.style.display = 'none'; return }
+  const STAT_KEYS = ['health', 'defense', 'attack', 'wealth', 'inspiration']
+  snapshotRow.innerHTML = STAT_KEYS
+    .map(k => `<span class="snap-stat">${k}: ${snapshot[k] ?? '?'}</span>`)
+    .join(' ')
+  snapshotPanel.style.display = 'block'
+  // Auto-hide after 12s — longer than normal deltas since it's more information
+  setTimeout(() => { snapshotPanel.style.display = 'none' }, 12000)
 }
 
 // ─── Auth UI ─────────────────────────────────────────────────────────────────
@@ -150,7 +166,6 @@ async function updatePositionDisplay(x, y, z) {
     charSettingEl.textContent = ''
   }
 
-  // z-layer badge with tooltip: conflict_modifier + decay warnings
   const zVal = z ?? 0
   const { data: zRow } = await supabase
     .from('z_properties')
@@ -162,31 +177,20 @@ async function updatePositionDisplay(x, y, z) {
     zLayerBadgeEl.textContent = `z${zVal}: ${zRow.layer_name}`
     zLayerBadgeEl.style.display = 'inline-block'
 
-    // Build tooltip lines
     const lines = [`z-layer: ${zRow.layer_name}`]
-
     const mod = zRow.conflict_modifier
     if (mod != null) {
       const sign = mod >= 0 ? '+' : ''
       lines.push(`Conflict modifier: ${sign}${mod}`)
     }
-
     const warnings = []
-    if (zRow.health_decay > 0)
-      warnings.push(`health decay: -${zRow.health_decay}/tick`)
-    if (zRow.durability_decay_multiplier > 1)
-      warnings.push(`durability decay: ×${zRow.durability_decay_multiplier}`)
-    if (zRow.requires_flight)
-      warnings.push('requires flight')
-    if (zRow.requires_breath)
-      warnings.push('requires breath')
-
-    if (warnings.length > 0)
-      lines.push(`⚠ ${warnings.join(' · ')}`)
+    if (zRow.health_decay > 0)            warnings.push(`health decay: -${zRow.health_decay}/tick`)
+    if (zRow.durability_decay_multiplier > 1) warnings.push(`durability decay: ×${zRow.durability_decay_multiplier}`)
+    if (zRow.requires_flight)             warnings.push('requires flight')
+    if (zRow.requires_breath)             warnings.push('requires breath')
+    if (warnings.length > 0)              lines.push(`⚠ ${warnings.join(' · ')}`)
 
     zLayerBadgeEl.title = lines.join('\n')
-
-    // Visual decay indicator on the badge itself
     if (zRow.health_decay > 0 || zRow.durability_decay_multiplier > 1) {
       zLayerBadgeEl.dataset.decay = 'true'
     } else {
@@ -221,8 +225,6 @@ function startCooldownBar(durationMs) {
 // ─── Travel modal ─────────────────────────────────────────────────────────────
 function openTravelModal() {
   const { x, y, z } = characterPos
-
-  // Disable/enable z buttons
   const upBtn   = document.getElementById('travel-up-btn')
   const downBtn = document.getElementById('travel-down-btn')
   upBtn.disabled   = false
@@ -232,7 +234,6 @@ function openTravelModal() {
   costInfo.textContent = 'cost: calculating…'
   travelModal.classList.add('open')
 
-  // Show cost info
   async function showCost(dx, dy, dz) {
     const tx = x + (dx || 0), ty = y + (dy || 0), tz = (z ?? 0) + (dz || 0)
     const { data } = await supabase
@@ -381,14 +382,18 @@ async function executeAction(action, charId, user, extraParams = {}) {
     setActionsDisabled(true)
     statusEl.textContent = `${action.replace(/_/g, ' ')}…`
     try {
-      const params = { target_entity_id: targetId }
-      if (amount !== null) params.amount = amount
+      const params = { target_character_id: targetId }
+      if (amount !== null) params.wealth_amount = amount
       const data = await submitAction(action, params)
       const delta = formatStatDeltas(data?.stat_deltas)
       statusEl.textContent = delta
         ? `${action.replace(/_/g, ' ')} — ${delta}`
         : `connected as ${user?.email ?? ''}`
-      return { ok: true, statDeltas: data?.stat_deltas }
+      // For reveal_stat: show snapshot panel
+      if (action === 'reveal_stat' && data?.snapshot) {
+        showSnapshot(data.snapshot)
+      }
+      return { ok: true, statDeltas: data?.stat_deltas, snapshot: data?.snapshot ?? null }
     } catch (e) {
       statusEl.textContent = `error: ${e.message}`
       return { error: e.message }
@@ -468,6 +473,10 @@ function parseCommand(raw) {
   if (input === 'resolve' || input === 'mediate' || input === 'peace')
     return { type: 'action', action: 'resolve_conflict' }
 
+  // observe / reveal_stat
+  if (input === 'observe' || input === 'read' || input === 'sense' || input === 'study')
+    return { type: 'action', action: 'reveal_stat' }
+
   // trade
   const tradeMatch = input.match(/^trade(?:\s+(\d+))?$/)
   if (tradeMatch)
@@ -520,6 +529,15 @@ async function handleCommand(raw, user) {
     else if (result?.ok) {
       const delta = formatStatDeltas(result.statDeltas)
       cmdLogFn(delta ? delta : 'done.', 'out')
+      // For reveal_stat: print snapshot to cmd log
+      if (result.snapshot) {
+        const snap = result.snapshot
+        cmdLogFn(
+          `observed — health:${snap.health} defense:${snap.defense} attack:${snap.attack} wealth:${snap.wealth} inspiration:${snap.inspiration}`,
+          'out'
+        )
+        showSnapshot(snap)
+      }
       if (result.statDeltas) {
         showStatDeltas(result.statDeltas)
         startCooldownBar(getCooldownRemaining())
@@ -615,7 +633,6 @@ async function init(user) {
   initModeToggle(user)
   initRealtimeLog()
 
-  // Load recent world events
   const { data: recentEvents } = await supabase
     .from('events')
     .select('*')

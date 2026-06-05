@@ -1,12 +1,15 @@
-// resolve-turn/index.ts  v9
-// Handles all 6 player actions: exchange_information, resolve_conflict,
-// introduce_conflict, exchange_material, travel, rest.
-// v9 changes (Milestone 23 — Option K: max_health cap):
-//   - applyOneStat now clamps health writes to characters.max_health.
-//     Reads max_health alongside current health; the written value is
-//     Math.min(current + delta, max_health) for '+' ops on health.
-//     Non-health stats and '-' operators are unaffected.
-// Depends on: migrations 001–019.
+// resolve-turn/index.ts  v10
+// Handles all 7 player actions: exchange_information, resolve_conflict,
+// introduce_conflict, exchange_material, travel, rest, reveal_stat.
+// v10 changes (Milestone 24 — Option M: reveal_stat):
+//   - New action: reveal_stat
+//     · Target character's visible stats (health, defense, attack,
+//       wealth, inspiration) returned in stat_deltas as a snapshot.
+//     · max_health is NOT included (canon: opaque to players).
+//     · +1 inspiration to actor (insight gained from the observation).
+//     · Duration: 8u.
+//     · Logged in chronicle and events like all other actions.
+// Depends on: migrations 001–020.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -22,10 +25,11 @@ const CORS_HEADERS = {
 
 const DURATION_MAP: Record<string, number> = {
   exchange_information: 10,
-  resolve_conflict: 7,
-  introduce_conflict: 5,
-  exchange_material: 3,
-  rest: 15,
+  resolve_conflict:     7,
+  introduce_conflict:   5,
+  exchange_material:    3,
+  rest:                 15,
+  reveal_stat:          8,
 };
 
 // ---------------------------------------------------------------------------
@@ -34,13 +38,8 @@ const DURATION_MAP: Record<string, number> = {
 
 function computeTravelDuration(details: Record<string, number>): number {
   const {
-    density = 1,
-    hydration = 1,
-    size = 1,
-    health = 1,
-    durability = 1,
-    implementation = 1,
-    inspiration = 0,
+    density = 1, hydration = 1, size = 1, health = 1,
+    durability = 1, implementation = 1, inspiration = 0,
   } = details;
   const base = (density + hydration) / 2;
   const charPenalty = size / Math.max(health, 0.1);
@@ -57,6 +56,16 @@ interface StatDelta {
   attribute: string;
   delta: number;
   target_character_id: number;
+}
+
+// For reveal_stat we return a snapshot map alongside normal deltas
+interface StatSnapshot {
+  character_id: number;
+  health: number;
+  defense: number;
+  attack: number;
+  wealth: number;
+  inspiration: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,10 +86,8 @@ const ACTION_MODIFIERS: Record<string, ModifierSpec> = {
   exchange_material:    { target_attribute: 'wealth',      operator: '+', value: 3 },
 };
 
-// rest is handled separately (two modifiers).
-
 // ---------------------------------------------------------------------------
-// applyOneStat — insert attribute_modifier + update character row immediately
+// applyOneStat — insert attribute_modifier + update character row
 // Health writes are clamped to max_health.
 // ---------------------------------------------------------------------------
 
@@ -108,7 +115,6 @@ async function applyOneStat(
 
   const delta = operator === '+' ? value : -value;
 
-  // Select current value + max_health (only needed for health cap, harmless otherwise)
   const { data: char } = await supabase
     .from('characters')
     .select(`${attribute}, max_health`)
@@ -119,14 +125,12 @@ async function applyOneStat(
     const current = (char as Record<string, number>)[attribute] ?? 0;
     let newValue = current + delta;
 
-    // Clamp health to max_health
     if (attribute === 'health' && operator === '+') {
       const cap = (char as Record<string, number>).max_health ?? 100;
       newValue = Math.min(newValue, cap);
     }
 
     const actualDelta = newValue - current;
-
     await supabase
       .from('characters')
       .update({ [attribute]: newValue })
@@ -139,7 +143,7 @@ async function applyOneStat(
 }
 
 // ---------------------------------------------------------------------------
-// applyModifier — single-modifier actions (shared helper)
+// applyModifier — single-modifier actions
 // ---------------------------------------------------------------------------
 
 async function applyModifier(
@@ -159,12 +163,11 @@ async function applyModifier(
     : actorCharacterId;
 
   const effectiveValue = spec.value + (spec.operator === '-' ? damageBonus : 0);
-
   return applyOneStat(supabase, eventId, targetId, spec.target_attribute, spec.operator, effectiveValue, now);
 }
 
 // ---------------------------------------------------------------------------
-// rest — +5 health (capped at max_health), +2 inspiration to actor
+// rest — +5 health (capped), +2 inspiration
 // ---------------------------------------------------------------------------
 
 async function handleRest(
@@ -179,13 +182,48 @@ async function handleRest(
 }
 
 // ---------------------------------------------------------------------------
+// reveal_stat — read target's visible stats; +1 inspiration to actor
+// Returns: actor stat delta + target snapshot keyed as
+//   { attribute: 'snapshot', delta: 0, target_character_id, snapshot: StatSnapshot }
+// The frontend reads the snapshot field for display.
+// ---------------------------------------------------------------------------
+
+async function handleRevealStat(
+  supabase: SupabaseClient,
+  eventId: number,
+  actorCharacterId: number,
+  targetCharacterId: number,
+  now: number
+): Promise<{ deltas: StatDelta[]; snapshot: StatSnapshot | null }> {
+  // +1 inspiration to actor
+  const inspirationDelta = await applyOneStat(supabase, eventId, actorCharacterId, 'inspiration', '+', 1, now);
+
+  // Read target's visible stats (max_health excluded — canon)
+  const { data: target } = await supabase
+    .from('characters')
+    .select('character_id, health, defense, attack, wealth, inspiration')
+    .eq('character_id', targetCharacterId)
+    .single();
+
+  const snapshot: StatSnapshot | null = target
+    ? {
+        character_id: (target as Record<string, number>).character_id,
+        health:       (target as Record<string, number>).health       ?? 0,
+        defense:      (target as Record<string, number>).defense      ?? 0,
+        attack:       (target as Record<string, number>).attack       ?? 0,
+        wealth:       (target as Record<string, number>).wealth       ?? 0,
+        inspiration:  (target as Record<string, number>).inspiration  ?? 0,
+      }
+    : null;
+
+  return { deltas: [inspirationDelta], snapshot };
+}
+
+// ---------------------------------------------------------------------------
 // z helpers
 // ---------------------------------------------------------------------------
 
-async function getCharacterZ(
-  supabase: SupabaseClient,
-  characterId: number
-): Promise<number | null> {
+async function getCharacterZ(supabase: SupabaseClient, characterId: number): Promise<number | null> {
   const { data } = await supabase
     .from('entity_positions')
     .select('grid_cells(z)')
@@ -198,10 +236,7 @@ async function getCharacterZ(
   return cell?.z ?? null;
 }
 
-async function getCellZ(
-  supabase: SupabaseClient,
-  gridCellId: number
-): Promise<number | null> {
+async function getCellZ(supabase: SupabaseClient, gridCellId: number): Promise<number | null> {
   const { data } = await supabase
     .from('grid_cells')
     .select('z')
@@ -210,10 +245,7 @@ async function getCellZ(
   return (data as { z?: number } | null)?.z ?? null;
 }
 
-async function getConflictModifier(
-  supabase: SupabaseClient,
-  z: number
-): Promise<number> {
+async function getConflictModifier(supabase: SupabaseClient, z: number): Promise<number> {
   const { data } = await supabase
     .from('z_properties')
     .select('conflict_modifier')
@@ -233,7 +265,6 @@ async function handleExchangeMaterial(
 ): Promise<StatDelta[]> {
   const amount = Math.max(1, details.wealth_amount ?? 1);
   const targetId = details.target_character_id ?? actorCharacterId;
-
   if (targetId === actorCharacterId) return [];
 
   const { data: actor } = await supabase
@@ -293,12 +324,10 @@ async function handleTravel(
     const flight: number = (charData as Record<string, number> | null)?.flight ?? 0;
     const breath: number = (charData as Record<string, number> | null)?.breath ?? 0;
 
-    if (destZ >= 1 && flight === 0) {
+    if (destZ >= 1 && flight === 0)
       return `Travel blocked: destination is air layer (z=${destZ}) but character has no flight.`;
-    }
-    if (destZ <= -2 && breath === 0) {
+    if (destZ <= -2 && breath === 0)
       return `Travel blocked: destination is deep water (z=${destZ}) but character has no breath.`;
-    }
   }
 
   await supabase
@@ -326,9 +355,8 @@ async function handleTravel(
 // ---------------------------------------------------------------------------
 
 serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === 'OPTIONS')
     return new Response('ok', { headers: CORS_HEADERS });
-  }
 
   try {
     const supabase = createClient(
@@ -389,8 +417,8 @@ serve(async (req: Request) => {
 
     const now = Date.now() / 1000;
     const submitTimestamp: number = details.submit_timestamp ?? now;
-    const sequenceIndex: number = details.sequence_index ?? 0;
-    const endTimestamp: number = now + duration;
+    const sequenceIndex: number  = details.sequence_index   ?? 0;
+    const endTimestamp: number   = now + duration;
 
     // 4. Branch fork limit check
     if (details.branch_fork && details.parent_branch_id !== undefined) {
@@ -417,16 +445,16 @@ serve(async (req: Request) => {
     const { data: event, error: eventErr } = await supabase
       .from('events')
       .insert({
-        setting_id: details.setting_id ?? null,
-        age: details.age ?? 0,
-        duration_units: duration,
-        start_timestamp: now,
-        end_timestamp: endTimestamp,
+        setting_id:       details.setting_id ?? null,
+        age:              details.age        ?? 0,
+        duration_units:   duration,
+        start_timestamp:  now,
+        end_timestamp:    endTimestamp,
         submit_timestamp: submitTimestamp,
-        sequence_index: sequenceIndex,
-        event_type: action,
+        sequence_index:   sequenceIndex,
+        event_type:       action,
         resolution_state: 'pending',
-        details: JSON.stringify(details),
+        details:          JSON.stringify(details),
       })
       .select('event_id, turn_number')
       .single();
@@ -442,13 +470,29 @@ serve(async (req: Request) => {
 
     // 6. Action-specific side effects
     const statDeltas: StatDelta[] = [];
+    let snapshot: StatSnapshot | null = null;
 
     if (action === 'rest') {
       const deltas = await handleRest(supabase, eventId, characterId, now);
       statDeltas.push(...deltas);
+
+    } else if (action === 'reveal_stat') {
+      const targetId = details.target_character_id;
+      if (!targetId) {
+        await supabase.from('events').delete().eq('event_id', eventId);
+        return new Response(
+          JSON.stringify({ error: 'reveal_stat requires target_character_id' }),
+          { status: 400, headers: CORS_HEADERS }
+        );
+      }
+      const result = await handleRevealStat(supabase, eventId, characterId, targetId, now);
+      statDeltas.push(...result.deltas);
+      snapshot = result.snapshot;
+
     } else if (action === 'exchange_material') {
       const deltas = await handleExchangeMaterial(supabase, characterId, details);
       statDeltas.push(...deltas);
+
     } else if (action === 'travel') {
       const travelError = await handleTravel(supabase, characterId, details, now);
       if (travelError) {
@@ -476,15 +520,15 @@ serve(async (req: Request) => {
 
     // 7. Insert chronicle entry
     const { error: chronicleErr } = await supabase.from('chronicle').insert({
-      timestamp: now,
-      sequence_index: sequenceIndex,
-      character_id: characterId,
-      setting_id: details.setting_id ?? null,
-      event_id: eventId,
+      timestamp:        now,
+      sequence_index:   sequenceIndex,
+      character_id:     characterId,
+      setting_id:       details.setting_id ?? null,
+      event_id:         eventId,
       player_id,
-      branch_id: details.branch_id ?? 0,
+      branch_id:        details.branch_id ?? 0,
       submit_timestamp: submitTimestamp,
-      details_json: JSON.stringify(details),
+      details_json:     JSON.stringify(details),
     });
 
     if (chronicleErr) {
@@ -508,16 +552,24 @@ serve(async (req: Request) => {
         player_id,
         character_id: characterId,
         action,
-        turn_number: event.turn_number ?? null,
+        turn_number:    event.turn_number ?? null,
         duration_units: duration,
-        stat_deltas: statDeltas,
+        stat_deltas:    statDeltas,
+        ...(snapshot ? { snapshot } : {}),
       },
     });
 
     return new Response(
-      JSON.stringify({ status: 'resolved', event_id: eventId, duration_units: duration, stat_deltas: statDeltas }),
+      JSON.stringify({
+        status: 'resolved',
+        event_id:       eventId,
+        duration_units: duration,
+        stat_deltas:    statDeltas,
+        ...(snapshot ? { snapshot } : {}),
+      }),
       { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
     );
+
   } catch (err) {
     return new Response(
       JSON.stringify({ error: String(err) }),
